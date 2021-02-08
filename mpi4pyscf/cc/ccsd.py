@@ -29,7 +29,6 @@ rank = mpi.rank
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
 
-
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
            tolnormt=1e-6, verbose=None):
@@ -83,7 +82,6 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
     mycc.t2 = t2
     log.timer('CCSD', *cput0)
     return conv, eccsd, t1, t2
-
 
 def update_amps(mycc, t1, t2, eris):
     time1 = time0 = time.clock(), time.time()
@@ -487,10 +485,11 @@ def _add_vvvv_full(mycc, t1T, t2T, eris, out=None, with_ovvv=False):
     return Ht2.reshape(t2T.shape)
 
 def _task_location(n, task=rank):
-    ntasks = mpi.pool.size
-    seg_size = (n + ntasks - 1) // ntasks
-    loc0 = min(n, seg_size * task)
-    loc1 = min(n, loc0 + seg_size)
+    neach, extras = divmod(n, mpi.pool.size)
+    section_sizes = ([0] + extras * [neach+1] + (mpi.pool.size-extras) * [neach])
+    div_points = numpy.cumsum(section_sizes)
+    loc0 = div_points[task]
+    loc1 = div_points[task + 1]
     return loc0, loc1
 
 ASYNC = True
@@ -525,6 +524,10 @@ else:
                 buf = mpi.rotate(buf)
             yield task, buf
 
+def _rotate_vir_block(buf, vlocs):
+    for task_id, buf_i in _rotate_tensor_block(buf):
+        loc0, loc1 = vlocs[task_id]
+        yield task_id, buf_i, loc0, loc1
 
 def _contract_vvvv_t2(mycc, vvvv, t2T, task_locs, out=None, verbose=None):
     '''Ht2 = numpy.einsum('ijcd,acbd->ijab', t2, vvvv)
@@ -697,7 +700,10 @@ def energy(mycc, t1=None, t2=None, eris=None):
     t2T = t2.transpose(2,3,0,1)
     fock = eris.fock
     loc0, loc1 = _task_location(nvir)
-    e = numpy.einsum('ia,ia', fock[:nocc,nocc:], t1) * 2
+    if rank == 0:
+        e = numpy.einsum('ia, ia', fock[:nocc, nocc:], t1) * 2
+    else:
+        e = 0.0
     max_memory = mycc.max_memory - lib.current_memory()[0]
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
@@ -737,11 +743,14 @@ def distribute_amplitudes_(mycc, t1=None, t2=None):
     return mycc.t2
 
 @mpi.parallel_call
-def gather_amplitudes(mycc):
+def gather_amplitudes(mycc, t1=None, t2=None):
     '''Reconstruct the t1, t2 amplitudes from the distributed t2 tensors
     '''
-    t1, t2 = mycc.t1, mycc1.t2
-    t2 = mpi.gather(t2.transpose(2,3,0,1)).transpose(2,3,0,1)
+    if t1 is None:
+        t1 = mycc.t1
+    if t2 is None:
+        t2 = mycc.t2
+    t2 = mpi.gather(t2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
     return t1, t2
 
 def _diff_norm(mycc, t1new, t2new, t1, t2):
@@ -836,6 +845,7 @@ class CCSD(ccsd.CCSD):
         if rank == 0:
             ccsd.CCSD.dump_flags(self, verbose)
         return self
+
     def sanity_check(self):
         if rank == 0:
             ccsd.CCSD.sanity_check(self)
@@ -1017,7 +1027,6 @@ def _cp(a, order=None):
     else:
         a = numpy.asarray(a, order=order)
     return a
-
 
 if __name__ == '__main__':
     from pyscf import gto
