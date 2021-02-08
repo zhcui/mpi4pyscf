@@ -200,7 +200,7 @@ def make_intermediates(mycc, t1, t2, eris):
     # ZHC NOTE: wovvo, v4 has shape j[c]bk
     wovvo = v4 + lib.einsum('jcbd, dk -> jcbk', eris["oxvv"], t1T)
     
-    tmp = np.einsum('bdlj, dk -> bklj', eris["xvoo"], t1T, optimize=True)
+    tmp = lib.einsum('bdlj, dk -> bklj', eris["xvoo"], t1T)
     for task_id, tmp_2, p0, p1 in _rotate_vir_block(tmp, vlocs=vlocs):
         wovvo[:, :, p0:p1] += lib.einsum('bklj, cl -> jcbk', tmp_2, t1T[vloc0:vloc1])
         tmp_2 = None

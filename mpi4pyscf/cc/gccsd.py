@@ -51,7 +51,6 @@ rank = mpi.rank
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
 
-@profile
 def update_amps(mycc, t1, t2, eris):
     """
     Update GCCSD amplitudes.
