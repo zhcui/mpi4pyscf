@@ -51,6 +51,7 @@ rank = mpi.rank
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
 
+@profile
 def update_amps(mycc, t1, t2, eris):
     """
     Update GCCSD amplitudes.
@@ -925,6 +926,9 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     log = logger.Logger(mycc.stdout, mycc.verbose)
     _sync_(mycc)
     eris = gccsd._PhysicistsERIs()
+    
+    print ("CHECK")
+    print ("rank", rank)
 
     if rank == 0:
         eris._common_init_(mycc, mo_coeff)
@@ -940,7 +944,7 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     vloc0, vloc1 = vlocs[rank]
     vseg = vloc1 - vloc0
 
-    fname = lib.param.TMPDIR + "/gccsd_eri_tmp.h5"
+    fname = "./gccsd_eri_tmp.h5"
     if rank == 0:
         # ZHC TODO use MPI to do ao2mo and build eri_phys.
         f = h5py.File(fname, 'w')
