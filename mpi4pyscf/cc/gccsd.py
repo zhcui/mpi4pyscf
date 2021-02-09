@@ -312,9 +312,10 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
 
     Wabef = np.empty((vloc1-vloc0, nvir, nvir, nvir))
     # ZHC FIXME here, I don't understand why this is needed.
-    eris_vvoo = np.empty((vloc1-vloc0, nvir, nocc, nocc))
-    eris_vvoo[:] = eris.xvoo
+    #eris_vvoo = np.empty((vloc1-vloc0, nvir, nocc, nocc))
+    #eris_vvoo[:] = eris.xvoo
     #eris_vvoo = eris["xvoo"]
+    eris_vvoo = eris.xvoo
 
     tauT = tauT * 0.25
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vvoo, vlocs=vlocs):

@@ -110,7 +110,7 @@ mf.get_hcore = lambda *args: hcoreX
 mf.kernel()
 
 mycc_ref = serial_cc.GCCSD(mf)
-mycc_ref.conv_tol = 1e-10
+mycc_ref.conv_tol = 1e-8
 mycc_ref.conv_tol_normt = 1e-6
 eris_ref = mycc_ref.ao2mo()
 
@@ -141,16 +141,16 @@ Wovvo_ref = imd.cc_Wovvo(t1_cc_ref, t2_cc_ref, eris_ref)
 
 # test class
 mycc = mpicc.GCCSD(mf)
-mycc.conv_tol = 1e-10
+mycc.conv_tol = 1e-8
 mycc.conv_tol_normt = 1e-6
 mycc.max_cycle = 50
 mycc.kernel()
 
 mycc.distribute_amplitudes_(t1_cc_ref, t2_cc_ref)
 
-#test_converged_lambda(mycc, ref=[l1_cc_ref, l2_cc_ref])
+test_converged_lambda(mycc, ref=[l1_cc_ref, l2_cc_ref])
 
-mycc.test_update_lambda(ref=[l1_cc_ref, l2_cc_ref])
+#mycc.test_update_lambda(ref=[l1_cc_ref, l2_cc_ref])
 
 rdm1 = mycc.make_rdm1()
 rdm1_ref = mycc_ref.make_rdm1()

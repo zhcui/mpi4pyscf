@@ -125,9 +125,9 @@ def make_intermediates(mycc, t1, t2, eris):
     #v1 += lib.einsum('jkca, jkbc -> ba', eris.oovv, tau) * 0.5
     tmp = lib.einsum('jbac, cj -> ba', eris.oxvv, t1T)
     v4 = np.zeros((nocc, nvir_seg, nvir, nocc))
-    eris_voov = np.empty((nvir_seg, nocc, nocc, nvir))
     
-    eris_voov[:] = eris.xvoo.transpose(0, 2, 3, 1)
+    #eris_voov = np.empty((nvir_seg, nocc, nocc, nvir))
+    eris_voov = eris.xvoo.transpose(0, 2, 3, 1)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_voov, vlocs=vlocs):
         tmp -= lib.einsum('cjka, bcjk -> ba', eri_tmp, tauT[:, p0:p1]) * 0.5
         v4  += lib.einsum('dljb, cdkl -> jcbk', eri_tmp, t2T[:, p0:p1])
@@ -207,8 +207,8 @@ def make_intermediates(mycc, t1, t2, eris):
         tmp_2 = None
     tmp = None
     
-    eris_vooo = np.empty((nvir_seg, nocc, nocc, nocc))
-    eris_vooo[:] = eris.ooox.transpose(3, 2, 1, 0)
+    #eris_vooo = np.empty((nvir_seg, nocc, nocc, nocc))
+    eris_vooo = eris.ooox.transpose(3, 2, 1, 0)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vooo, vlocs=vlocs):
         wovvo[:, :, p0:p1] -= lib.einsum('bkjl, cl -> jcbk', eri_tmp, t1T[vloc0:vloc1])
         eri_tmp = None
@@ -232,8 +232,8 @@ def make_intermediates(mycc, t1, t2, eris):
     wovoo += lib.einsum('icbk, bj -> icjk', v4, t1T)
 
     tauT *= 0.25
-    eris_vooo = np.empty((nvir_seg, nocc, nocc, nocc))
-    eris_vooo[:] = eris.ooox.transpose(3, 0, 1, 2)
+    #eris_vooo = np.empty((nvir_seg, nocc, nocc, nocc))
+    eris_vooo = eris.ooox.transpose(3, 0, 1, 2)
     #eris_vooo = eris["ooox"].transpose(3, 0, 1, 2)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vooo, vlocs=vlocs):
         wovoo -= lib.einsum('blij, cbkl -> icjk', eri_tmp, t2T[:, p0:p1])
@@ -363,8 +363,9 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     #l2new += tmp
     #l2new -= tmp.transpose(0, 1, 3, 2)
     tmp  = np.einsum('ai, bj -> abij', l1T[vloc0:vloc1], fvo1)
-    wvovo = np.empty((nvir_seg, nocc, nvir, nocc))
-    wvovo[:] = np.asarray(imds.wovvo).transpose(1, 0, 2, 3)
+    #wvovo = np.empty((nvir_seg, nocc, nvir, nocc))
+    #wvovo[:] = np.asarray(imds.wovvo).transpose(1, 0, 2, 3)
+    wvovo = np.asarray(imds.wovvo).transpose(1, 0, 2, 3)
     for task_id, w_tmp, p0, p1 in _rotate_vir_block(wvovo, vlocs=vlocs):
         tmp -= lib.einsum('acki, cjbk -> abij', l2T[:, p0:p1], w_tmp)
         w_tmp = None
