@@ -144,15 +144,13 @@ mycc = mpicc.GCCSD(mf)
 mycc.conv_tol = 1e-10
 mycc.conv_tol_normt = 1e-6
 mycc.max_cycle = 50
+mycc.kernel()
+
 mycc.distribute_amplitudes_(t1_cc_ref, t2_cc_ref)
 
-test_converged_lambda(mycc, ref=[l1_cc_ref, l2_cc_ref])
-#mycc.test_update_lambda(ref=[l1_cc_ref, l2_cc_ref])
-#conv, l1, l2 = mycc.kernel_lambda(eris=None, t1=None, t2=None, l1=None, l2=None,
-#           max_cycle=50, tol=1e-6, verbose=None,
-#           fintermediates=None, fupdate=None)
+#test_converged_lambda(mycc, ref=[l1_cc_ref, l2_cc_ref])
 
-#print (max_abs(l1 - l1_cc_ref))
+mycc.test_update_lambda(ref=[l1_cc_ref, l2_cc_ref])
 
 rdm1 = mycc.make_rdm1()
 rdm1_ref = mycc_ref.make_rdm1()
@@ -163,39 +161,39 @@ print (max_abs(rdm1 - rdm1_ref))
 
 exit()
 
-test_init_amps(mycc)
-test_converged_ecc(mycc)
-
-test_converged_lambda(mycc)
-
-imds_ref = serial_lambda.make_intermediates(mycc_ref, t1_cc_ref, t2_cc_ref, eris_ref)
-
-mycc.distribute_amplitudes_(t1_cc_ref, t2_cc_ref)
-imds = mycc.test_lambda_imds(ref=None)
-
-print ("*" * 79)
-print ("test make_intermediates")
-print ("test v1")
-print (max_abs(imds.v1 - imds_ref.v1))
-print ("test v2")
-print (max_abs(imds.v2 - imds_ref.v2))
-print ("test w3")
-print (max_abs(imds.w3 - imds_ref.w3))
-print ("test woooo")
-print (max_abs(np.asarray(imds.woooo) - np.asarray(imds_ref.woooo)))
-print ("test wovvo")
-print (max_abs(np.asarray(imds.wovvo) - np.asarray(imds_ref.wovvo)))
-print ("test wovoo")
-print (max_abs(np.asarray(imds.wovoo) - np.asarray(imds_ref.wovoo)))
-print ("test wvvvo")
-print (max_abs(np.asarray(imds.wvvvo) - np.asarray(imds_ref.wvvvo)))
-
-
-l1new_ref, l2new_ref = serial_lambda.update_lambda(mycc_ref, t1_cc_ref, t2_cc_ref, 
-                                            t1_cc_ref, t2_cc_ref, eris_ref,
-                                            imds_ref)
-
-mycc.test_update_lambda(ref=[l1new_ref, l2new_ref])
+#test_init_amps(mycc)
+#test_converged_ecc(mycc)
+#
+#test_converged_lambda(mycc)
+#
+#imds_ref = serial_lambda.make_intermediates(mycc_ref, t1_cc_ref, t2_cc_ref, eris_ref)
+#
+#mycc.distribute_amplitudes_(t1_cc_ref, t2_cc_ref)
+##imds = mycc.test_lambda_imds(ref=None)
+#
+#print ("*" * 79)
+#print ("test make_intermediates")
+#print ("test v1")
+#print (max_abs(imds.v1 - imds_ref.v1))
+#print ("test v2")
+#print (max_abs(imds.v2 - imds_ref.v2))
+#print ("test w3")
+#print (max_abs(imds.w3 - imds_ref.w3))
+#print ("test woooo")
+#print (max_abs(np.asarray(imds.woooo) - np.asarray(imds_ref.woooo)))
+#print ("test wovvo")
+#print (max_abs(np.asarray(imds.wovvo) - np.asarray(imds_ref.wovvo)))
+#print ("test wovoo")
+#print (max_abs(np.asarray(imds.wovoo) - np.asarray(imds_ref.wovoo)))
+#print ("test wvvvo")
+#print (max_abs(np.asarray(imds.wvvvo) - np.asarray(imds_ref.wvvvo)))
+#
+#
+#l1new_ref, l2new_ref = serial_lambda.update_lambda(mycc_ref, t1_cc_ref, t2_cc_ref, 
+#                                            t1_cc_ref, t2_cc_ref, eris_ref,
+#                                            imds_ref)
+#
+#mycc.test_update_lambda(ref=[l1new_ref, l2new_ref])
 
 print ("test tau")
 mycc.test_make_tau(ref=tau_ref)

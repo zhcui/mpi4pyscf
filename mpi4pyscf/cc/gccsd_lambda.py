@@ -123,10 +123,11 @@ def make_intermediates(mycc, t1, t2, eris):
     v1  = fvv - np.dot(t1T, fov)
     #v1 -= lib.einsum('jbac, jc -> ba', eris.ovvv, t1)
     #v1 += lib.einsum('jkca, jkbc -> ba', eris.oovv, tau) * 0.5
-    tmp = lib.einsum('jbac, cj -> ba', eris["oxvv"], t1T)
+    tmp = lib.einsum('jbac, cj -> ba', eris.oxvv, t1T)
     v4 = np.zeros((nocc, nvir_seg, nvir, nocc))
     eris_voov = np.empty((nvir_seg, nocc, nocc, nvir))
-    eris_voov[:] = eris["ooxv"].transpose(2, 0, 1, 3)
+    
+    eris_voov[:] = eris.xvoo.transpose(0, 2, 3, 1)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_voov, vlocs=vlocs):
         tmp -= lib.einsum('cjka, bcjk -> ba', eri_tmp, tauT[:, p0:p1]) * 0.5
         v4  += lib.einsum('dljb, cdkl -> jcbk', eri_tmp, t2T[:, p0:p1])
@@ -139,15 +140,15 @@ def make_intermediates(mycc, t1, t2, eris):
 
     #v2 -= lib.einsum('kijb, kb -> ij', eris.ooov, t1)
     #v2 += lib.einsum('ikbc, jkbc -> ij', eris.oovv, tau) * 0.5
-    tmp  = lib.einsum('kijb, bk -> ij', eris["ooox"], t1T[vloc0:vloc1])
-    tmp -= lib.einsum('ikbc, bcjk -> ij', eris["ooxv"], tauT) * 0.5
+    tmp  = lib.einsum('kijb, bk -> ij', eris.ooox, t1T[vloc0:vloc1])
+    tmp -= lib.einsum('bcik, bcjk -> ij', eris.xvoo, tauT) * 0.5
     v2  -= mpi.allreduce(tmp)
     
     ##v3  = lib.einsum('ijcd, klcd -> ijkl', eris.oovv, tau)
     #v4  = lib.einsum('ljdb, klcd -> jcbk', eris.oovv, t2)
     #v4 += np.asarray(eris.ovvo)
     # ZHC NOTE see line 128
-    v4 += np.asarray(eris["oxvo"])
+    v4 -= np.asarray(eris.oxov.transpose(0, 1, 3, 2))
     
     #v5  = fvo + lib.einsum('kc, jkbc -> bj', fov, t2)
     #tmp = fov - lib.einsum('kldc, ld -> kc', eris.oovv, t1)
@@ -157,15 +158,15 @@ def make_intermediates(mycc, t1, t2, eris):
     #tmp = fvo + mpi.allgather(lib.einsum('klcd, dl -> ck', eris.oovv, t1T))
     #v5 += np.einsum('ck, bk, cj -> bj', tmp, t1T, t1T, optimize=True)
     v5  = fvo + mpi.allgather(lib.einsum('kc, bcjk -> bj', fov, t2T))
-    tmp = fvo[vloc0:vloc1] + lib.einsum('klcd, dl -> ck', eris["ooxv"], t1T)
+    tmp = fvo[vloc0:vloc1] + lib.einsum('cdkl, dl -> ck', eris.xvoo, t1T)
     v5 += mpi.allreduce(np.einsum('ck, bk, cj -> bj', tmp, t1T, t1T[vloc0:vloc1], optimize=True))
      
     #v5 -= lib.einsum('kljc, klbc -> bj', eris.ooov, t2) * 0.5
-    v5 += mpi.allreduce(lib.einsum('kljc, cbkl -> bj', eris["ooox"], t2T)) * 0.5
+    v5 += mpi.allreduce(lib.einsum('kljc, cbkl -> bj', eris.ooox, t2T)) * 0.5
     #v5 += lib.einsum('kbdc, jkcd -> bj', eris.ovvv, t2) * 0.5
     tmp = np.zeros((nvir_seg, nocc))
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        tmp += lib.einsum('kbcd, cdjk -> bj', eris["oxvv"][:, :, p0:p1], t2T_tmp)
+        tmp += lib.einsum('kbcd, cdjk -> bj', eris.oxvv[:, :, p0:p1], t2T_tmp)
         t2T_tmp = None
     tmp *= 0.5
     tmp  = mpi.allgather(tmp)
@@ -185,10 +186,10 @@ def make_intermediates(mycc, t1, t2, eris):
     #woooo += lib.einsum('jilc, kc -> jilk', eris.ooov, t1)
     #imds.woooo[:] = woooo
     #woooo = None
-    woooo  = lib.einsum('ijcd, cdkl -> ijkl', eris["ooxv"], tauT) * 0.25
-    woooo += lib.einsum('jilc, ck -> jilk', eris["ooox"], t1T[vloc0:vloc1])
+    woooo  = lib.einsum('cdij, cdkl -> ijkl', eris.xvoo, tauT) * 0.25
+    woooo += lib.einsum('jilc, ck -> jilk', eris.ooox, t1T[vloc0:vloc1])
     woooo  = mpi.allreduce(woooo)
-    woooo += np.asarray(eris["oooo"]) * 0.5
+    woooo += np.asarray(eris.oooo) * 0.5
     imds.woooo[:] = woooo
     woooo = None
     
@@ -198,16 +199,16 @@ def make_intermediates(mycc, t1, t2, eris):
     #imds.wovvo[:] = wovvo
     #wovvo = None
     # ZHC NOTE: wovvo, v4 has shape j[c]bk
-    wovvo = v4 + lib.einsum('jcbd, dk -> jcbk', eris["oxvv"], t1T)
+    wovvo = v4 + lib.einsum('jcbd, dk -> jcbk', eris.oxvv, t1T)
     
-    tmp = lib.einsum('bdlj, dk -> bklj', eris["xvoo"], t1T)
+    tmp = lib.einsum('bdlj, dk -> bklj', eris.xvoo, t1T)
     for task_id, tmp_2, p0, p1 in _rotate_vir_block(tmp, vlocs=vlocs):
         wovvo[:, :, p0:p1] += lib.einsum('bklj, cl -> jcbk', tmp_2, t1T[vloc0:vloc1])
         tmp_2 = None
     tmp = None
     
     eris_vooo = np.empty((nvir_seg, nocc, nocc, nocc))
-    eris_vooo[:] = eris["xooo"]
+    eris_vooo[:] = eris.ooox.transpose(3, 2, 1, 0)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vooo, vlocs=vlocs):
         wovvo[:, :, p0:p1] -= lib.einsum('bkjl, cl -> jcbk', eri_tmp, t1T[vloc0:vloc1])
         eri_tmp = None
@@ -223,16 +224,16 @@ def make_intermediates(mycc, t1, t2, eris):
     #wovoo = None
     wovoo = np.zeros((nocc, nvir_seg, nocc, nocc))
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
-        wovoo += lib.einsum('icdb, dbjk -> icjk', eris["oxvv"][:, :, p0:p1], tauT_tmp)
+        wovoo += lib.einsum('icdb, dbjk -> icjk', eris.oxvv[:, :, p0:p1], tauT_tmp)
         tauT_tmp = None
     wovoo *= 0.25
 
-    wovoo += np.asarray(eris["oxoo"]) * 0.5
+    wovoo += np.asarray(eris.ooox.transpose(2, 3, 0, 1)) * 0.5
     wovoo += lib.einsum('icbk, bj -> icjk', v4, t1T)
 
     tauT *= 0.25
     eris_vooo = np.empty((nvir_seg, nocc, nocc, nocc))
-    eris_vooo[:] = eris["ooox"].transpose(3, 0, 1, 2)
+    eris_vooo[:] = eris.ooox.transpose(3, 0, 1, 2)
     #eris_vooo = eris["ooox"].transpose(3, 0, 1, 2)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vooo, vlocs=vlocs):
         wovoo -= lib.einsum('blij, cbkl -> icjk', eri_tmp, t2T[:, p0:p1])
@@ -261,10 +262,10 @@ def make_intermediates(mycc, t1, t2, eris):
     # line 238
     #wvvvo += lib.einsum('jlka, jlbc -> bcak', np.asarray(eris.ooov) * 0.25, tau)
 
-    wvvvo = np.asarray(eris["ovvx"]).conj().transpose(3, 2, 1, 0) * 0.5
+    wvvvo = np.asarray(eris.ovvx).conj().transpose(3, 2, 1, 0) * 0.5
     
     #wvvvo += lib.einsum('kbad, cdjk -> bcaj', eris.ovvv, t2T)
-    eris_ovvv = eris["oxvv"]
+    eris_ovvv = eris.oxvv
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
         wvvvo[:, p0:p1] -= lib.einsum('kbad, cdjk -> bcaj', eris_ovvv, t2T_tmp)
         t2T_tmp = None
@@ -331,18 +332,19 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     #m3  -= lib.einsum('kcba, ijck -> ijab', eris.ovvv, tmp)
     #tmp  = None
     #m3  += lib.einsum('ijcd, cdab -> ijab', l2, eris.vvvv) * 0.5
-    vvoo = np.asarray(eris["xvoo"])
+    vvoo = np.asarray(eris.xvoo)
     m3  += lib.einsum('abkl, ijkl -> abij', vvoo, tmp) * 0.25
     tmp  = lib.einsum('cdij, dk -> ckij', l2T, t1T)
     for task_id, tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=vlocs):
-        m3 -= lib.einsum('kcba, ckij -> abij', eris["ovvx"][:, p0:p1], tmp)
+        m3 -= lib.einsum('kcba, ckij -> abij', eris.ovvx[:, p0:p1], tmp)
         tmp = None
-    eris_vvvv = eris["vvxv"]
+    eris_vvvv = eris.xvvv.transpose(2, 3, 0, 1)
     tmp_2 = np.empty_like(l2T) # used for line 387
     for task_id, l2T_tmp, p0, p1 in _rotate_vir_block(l2T, vlocs=vlocs):
         m3 += lib.einsum('cdij, cdab -> abij', l2T_tmp, eris_vvvv[p0:p1]) * 0.5
         tmp_2[:, p0:p1] = lib.einsum('acij, cb -> baij', l2T_tmp, v1[:, vloc0:vloc1])
         l2T_tmp = None
+    eris_vvvv = None
     
     #l1new = lib.einsum('ijab, jb -> ia', m3, t1)
     #l2new = m3
@@ -382,7 +384,7 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     #tmp += lib.einsum('ca, ijcb -> ijab', tmp1vv, oovv)
     #l2new -= tmp
     #l2new += tmp.transpose(0,1,3,2)
-    tmp  = lib.einsum('ak, kbij -> baij', l1T, eris["oxoo"])
+    tmp  = lib.einsum('ak, ijkb -> baij', l1T, eris.ooox)
     # see line 343
     #tmp -= lib.einsum('acij, cb -> abij', l2T, v1)
     tmp -= tmp_2
@@ -405,7 +407,9 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     #l2new -= tmp.transpose(1, 0, 2, 3)
     #tmp = None
     
-    tmp  = lib.einsum('bajc, ci -> baji', eris["xvov"], l1T)
+    # bajc jcab
+    # xvov -ovvx
+    tmp  = lib.einsum('jcab, ci -> baji', eris.ovvx, -l1T)
     tmp += lib.einsum('abki, jk -> abij', l2T, v2)
     tmp1oo = mij + np.dot(l1T.T, t1T) # ik
     tmp -= lib.einsum('ik, abkj -> abij', tmp1oo, vvoo)
@@ -433,7 +437,9 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     #l1Tnew = 0.0
     l1Tnew += fvo
     #l1Tnew += mpi.allreduce(lib.einsum('bj, ibaj -> ai', l1T[vloc0:vloc1], eris["oxvo"]))
-    tmp = lib.einsum('bj, ibaj -> ai', l1T[vloc0:vloc1], eris["oxvo"])
+    # oxvo oxov
+    # ibaj ibja
+    tmp = lib.einsum('bj, ibja -> ai', -l1T[vloc0:vloc1], eris.oxov)
     l1Tnew += np.dot(v1.T, l1T)
     l1Tnew -= np.dot(l1T, v2.T)
     tmp -= lib.einsum('cakj, icjk -> ai', l2T, imds.wovoo)
@@ -447,9 +453,9 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     tmp += lib.einsum('baji, bj -> ai', vvoo, tmp_2)
     tmp_2 = None
 
-    tmp += lib.einsum('icab, bc -> ai', eris["oxvv"], tmp1vv[:, vloc0:vloc1])
+    tmp += lib.einsum('icab, bc -> ai', eris.oxvv, tmp1vv[:, vloc0:vloc1])
     l1Tnew += mpi.allreduce(tmp)
-    l1Tnew -= mpi.allgather(lib.einsum('jika, kj -> ai', eris["ooox"], tmp1oo))
+    l1Tnew -= mpi.allgather(lib.einsum('jika, kj -> ai', eris.ooox, tmp1oo))
     
     tmp = fvo - mpi.allreduce(lib.einsum('bakj, bj -> ak', vvoo, t1T[vloc0:vloc1]))
     vvoo = None

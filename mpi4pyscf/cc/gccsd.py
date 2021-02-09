@@ -88,12 +88,12 @@ def update_amps(mycc, t1, t2, eris):
     t1Tnew  = np.dot(Fvv, t1T)
     t1Tnew -= np.dot(t1T, Foo)
 
-    tmp  = lib.einsum('aeim, me -> ai', t2T, Fov)
-    tmp -= lib.einsum('fn, naif -> ai', t1T, eris["oxov"])
+    tmp  = np.einsum('aeim, me -> ai', t2T, Fov)
+    tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov)
     tmp  = mpi.allgather(tmp)
 
-    tmp2  = lib.einsum('eamn, iemn -> ai', t2T, eris["oxoo"])
-    tmp2 += lib.einsum('efim, efam -> ai', t2T, eris["xvvo"])
+    tmp2  = lib.einsum('eamn, mnie -> ai', t2T, eris.ooox)
+    tmp2 += lib.einsum('efim, mafe -> ai', t2T, eris.ovvx)
     tmp2 *= 0.5
     tmp2  = mpi.allreduce(tmp2)
     tmp += tmp2
@@ -119,7 +119,7 @@ def update_amps(mycc, t1, t2, eris):
     t2Tnew += tmp.transpose(0, 1, 3, 2)
     tmp = None
     
-    t2Tnew += np.asarray(eris["xvoo"])
+    t2Tnew += np.asarray(eris.xvoo)
     tauT = make_tauT(t1T, t2T, vlocs=vlocs)
     Woooo = cc_Woooo(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
     t2Tnew += lib.einsum('abmn, mnij -> abij', tauT, Woooo * 0.5)
@@ -133,7 +133,7 @@ def update_amps(mycc, t1, t2, eris):
     tauT = None
 
     #tmp = lib.einsum('mbje, ei -> bmij', eris["oxov"], t1T) # [b]mij
-    tmp = lib.einsum('bmje, ei -> bmij', eris["xoov"], -t1T) # [b]mij
+    tmp = lib.einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
     tmp = mpi.allgather(tmp) # bmij
     tmp = lib.einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
 
@@ -160,11 +160,13 @@ def update_amps(mycc, t1, t2, eris):
     #    t2Tnew -= tmp.transpose(0, 1, 3, 2)
     #    tmp = None
     #eris_vovv = None
-    tmp = lib.einsum('ei, baej -> abij', -t1T, eris["vxvo"])
+    # vxvo ovvx
+    # baej jeba
+    tmp = lib.einsum('ei, jeba -> abij', t1T, eris.ovvx)
     t2Tnew += tmp
     t2Tnew -= tmp.transpose(0, 1, 3, 2)
 
-    tmp = lib.einsum('am, mbij -> baij', t1T, eris["oxoo"].conj())
+    tmp = lib.einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
     t2Tnew += tmp
     tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
                         split_recvbuf=True)
@@ -218,7 +220,7 @@ def cc_Fov(t1T, eris, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     fov  = eris.fock[:nocc, nocc:]
-    Fme  = lib.einsum('efmn, fn -> em', eris["xvoo"], t1T)
+    Fme  = np.einsum('efmn, fn -> em', eris.xvoo, t1T)
     Fme  = mpi.allgather(Fme).T
     Fme += fov
     return Fme
@@ -242,11 +244,13 @@ def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     #for task_id, tauT_tilde, p0, p1 in _rotate_vir_block(tauT_tilde, vlocs=vlocs):
     #    Fea += 0.5 * lib.einsum('efmn, famn -> ea', eris["xvoo"][:, p0:p1], tauT_tilde)
     #tauT_tilde = None
-    Fae = (-0.5) * lib.einsum('femn, famn -> ae', eris["xvoo"], tauT_tilde)
+    Fae = (-0.5) * lib.einsum('femn, famn -> ae', eris.xvoo, tauT_tilde)
     Fae = mpi.allreduce(Fae)
     tauT_tilde = None
     
-    Fea += lib.einsum('efam, fm -> ea', eris["xvvo"], t1T)
+    # xvvo ovvx
+    # efam mafe
+    Fea += np.einsum('mafe, fm -> ea', eris.ovvx, t1T)
     Fae += mpi.allgather(Fea).T
     return Fae
 
@@ -259,9 +263,9 @@ def cc_Foo(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
         tauT_tilde = make_tauT(t1T, t2T, fac=0.5, vlocs=vlocs)
     vloc0, vloc1 = vlocs[rank]
     
-    Fmi  = 0.5 * lib.einsum('mnef, efin -> mi', eris["ooxv"], tauT_tilde)
+    Fmi  = 0.5 * lib.einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
     tauT_tilde = None
-    Fmi += lib.einsum('mnie, en -> mi', eris["ooox"], t1T[vloc0:vloc1])
+    Fmi += np.einsum('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1])
     Fmi  = mpi.allreduce(Fmi)
 
     fov = eris.fock[:nocc, nocc:]
@@ -280,14 +284,14 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
     if tauT is None:
         tauT = make_tauT(t1T, t2T, vlocs=vlocs)
 
-    Wmnij = lib.einsum('mnef, efij -> mnij', eris["ooxv"], tauT) * 0.25
+    Wmnij = lib.einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
     tauT = None
-    tmp = lib.einsum('mnie, ej -> mnij', eris["ooox"], t1T[vloc0:vloc1])
+    tmp = lib.einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
     Wmnij += tmp
     Wmnij -= tmp.transpose(0, 1, 3, 2)
     tmp = None
     Wmnij  = mpi.allreduce(Wmnij)
-    Wmnij += eris["oooo"]
+    Wmnij += eris.oooo
     return Wmnij
 
 def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
@@ -309,7 +313,8 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
     Wabef = np.empty((vloc1-vloc0, nvir, nvir, nvir))
     # ZHC FIXME here, I don't understand why this is needed.
     eris_vvoo = np.empty((vloc1-vloc0, nvir, nocc, nocc))
-    eris_vvoo[:] = eris["xvoo"]
+    eris_vvoo[:] = eris.xvoo
+    #eris_vvoo = eris["xvoo"]
 
     tauT = tauT * 0.25
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vvoo, vlocs=vlocs):
@@ -318,8 +323,8 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
     eris_vvoo = None
     tauT = None
 
-    Wabef += np.asarray(eris["xvvv"])
-    tmp = lib.einsum('bm, mafe -> abfe', t1T, eris["oxvv"])
+    Wabef += np.asarray(eris.xvvv)
+    tmp = lib.einsum('bm, mafe -> abfe', t1T, eris.oxvv)
     Wabef += tmp
 
     tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
@@ -342,10 +347,12 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
 
-    Wmbej = lib.einsum('mnef, fj -> mnej', eris["ooxv"], -t1T)
+    Wmbej = lib.einsum('efmn, fj -> mnej', eris.xvoo, -t1T)
     Wmbej = lib.einsum('mnej, bn -> mbej', Wmbej, t1T)
     
-    Wmbej += lib.einsum('mbef, fj -> mbej', eris["ovxv"], t1T)
+    # ovxv ovvx
+    # mbef mbfe
+    Wmbej -= lib.einsum('mbfe, fj -> mbej', eris.ovvx, t1T)
 
     #tmp = lib.einsum('efbm, fj -> bemj', eris["vvvo"], -t1T)
     #tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
@@ -355,13 +362,13 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
     #    Wmbej[:, p0:p1] += tmp.transpose(2, 0, 1, 3)
     #    tmp = None
     #tmpT = None
-    Wmbej += lib.einsum('bn, jemn -> mbej', t1T, eris["oxoo"])
+    Wmbej += lib.einsum('bn, mnje -> mbej', t1T, eris.ooox)
 
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        Wmbej -= 0.5 * lib.einsum('fbjn, efmn -> mbej', t2T_tmp, eris["xvoo"][:, p0:p1])
+        Wmbej -= 0.5 * lib.einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
         t2T_tmp = None
 
-    Wmbej += np.asarray(eris["ovxo"])
+    Wmbej -= np.asarray(eris.oxov.transpose(2, 3, 1, 0))
     return Wmbej
 
 @mpi.parallel_call(skip_args=[3], skip_kwargs=['eris'])
@@ -386,7 +393,7 @@ def energy(mycc, t1=None, t2=None, eris=None):
     max_memory = mycc.max_memory - lib.current_memory()[0]
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
-        eris_vvoo = eris["xvoo"][p0:p1]
+        eris_vvoo = eris.xvoo[p0:p1]
         e += 0.25 * np.einsum('ijab, abij', t2[:, :, p0:p1], eris_vvoo)
         e += 0.50 * np.einsum('ia, jb, abij', t1[:, loc0+p0:loc0+p1], t1,
                               eris_vvoo, optimize=True)
@@ -416,7 +423,7 @@ def init_amps(mycc, eris=None):
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
     emp2 = 0
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
-        eris_vvoo = eris["xvoo"][p0:p1]
+        eris_vvoo = eris.xvoo[p0:p1]
         t2T[p0:p1] = (eris_vvoo / lib.direct_sum('ia, jb -> abij', eia[:, loc0+p0:loc0+p1], eia))
         emp2 += 0.25 * np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj()).real
         eris_vvoo = None
@@ -925,9 +932,6 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     log = logger.Logger(mycc.stdout, mycc.verbose)
     _sync_(mycc)
     eris = gccsd._PhysicistsERIs()
-    
-    print ("CHECK")
-    print ("rank", rank)
 
     if rank == 0:
         eris._common_init_(mycc, mo_coeff)
@@ -942,8 +946,8 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
     vloc0, vloc1 = vlocs[rank]
     vseg = vloc1 - vloc0
-
-    fname = "./gccsd_eri_tmp.h5"
+    
+    fname = "gccsd_eri_tmp.h5"
     if rank == 0:
         # ZHC TODO use MPI to do ao2mo and build eri_phys.
         f = h5py.File(fname, 'w')
@@ -968,56 +972,39 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
             eri_slice = None
         eri = None
         f.close()
-
-    comm.Barrier()
-    #f = h5py.File(fname, 'r')
-    f = lib.H5TmpFile(filename=fname, mode='r')
-    eri_phys = f["eri_phys"]
-    eris.feri1 = f
-
-    #eris.feri1 = lib.H5TmpFile()
-    #eris.oooo = eris.feri1.create_dataset('oooo', (nocc, nocc, nocc, nocc), 'f8')
-    ## ooov
-    #eris.ovoo = eris.feri1.create_dataset('ovoo', (nocc, vseg, nocc, nocc), 'f8', chunks=(nocc, 1, nocc, nocc))
-    #eris.oovv = eris.feri1.create_dataset('oovv', (nocc, nocc, vseg, nvir), 'f8', chunks=(nocc, nocc, 1, nvir))
-    #eris.ovov = eris.feri1.create_dataset('ovov', (nocc, vseg, nocc, nvir), 'f8', chunks=(nocc, 1, nocc, nvir))
-    #eris.ovvo = eris.feri1.create_dataset('ovvo', (nocc, vseg, nvir, nocc), 'f8', chunks=(nocc, 1, nvir, nocc))
-    ## ovvv
-    #eris.vvvo = eris.feri1.create_dataset('vvvo', (vseg, nvir, nvir, nocc), 'f8', chunks=(1, nvir, 1, nocc))
-    #eris.vvvv = eris.feri1.create_dataset('vvvv', (vseg, nvir, nvir, nvir), 'f8', chunks=(1, nvir, 1, nvir))
-    #
-    #eris.oooo[:] = eri_phys[:nocc, :nocc, :nocc, :nocc]
-    #eris.ovoo[:] = eri_phys[:nocc, nocc+vloc0:nocc+vloc1, :nocc, :nocc]
-    #eris.oovv[:] = eri_phys[:nocc, :nocc, nocc+vloc0:nocc+vloc1, nocc:]
-    #eris.ovov[:] = eri_phys[:nocc, nocc+vloc0:nocc+vloc1, :nocc, nocc:]
-    #eris.ovvo[:] = eri_phys[:nocc, nocc+vloc0:nocc+vloc1, nocc:, :nocc]
-    #eris.vvvo[:] = eri_phys[nocc+vloc0:nocc+vloc1, nocc:, nocc:, :nocc]
-    #eris.vvvv[:] = eri_phys[nocc+vloc0:nocc+vloc1, nocc:, nocc:, nocc:]
-    #
-    #eri_phys = None
-    #f.close()
-
-    def __getitem__(self, string):
-        idx = []
-        for s in string:
-            if s == 'o':
-                idx_s = slice(0, nocc)
-            elif s == 'v':
-                idx_s = slice(nocc, nmo)
-            elif s == 'x':
-                idx_s = slice(nocc+vloc0, nocc+vloc1)
-            else:
-                raise ValueError
-            idx.append(idx_s)
-        return eri_phys[idx[0], idx[1], idx[2], idx[3]]
-
-    gccsd._PhysicistsERIs.__getitem__ = __getitem__
-    # ZHC NOTE another way?
-    #gccsd._PhysicistsERIs.oooo = property(lambda self: eri_phys[:nocc, :nocc, :nocc, :nocc])
     
-    #comm.Barrier()
-    #if rank == 0:
-    #    os.remove(fname)
+    comm.Barrier()
+    f = lib.H5TmpFile(filename=fname, mode='r')
+    #eris.feri1 = f
+    eri_phys = f["eri_phys"]
+    eris.oooo = np.asarray(eri_phys[:nocc, :nocc, :nocc, :nocc])
+    eris.ooox = np.asarray(eri_phys[:nocc, :nocc, :nocc, nocc+vloc0:nocc+vloc1])
+    eris.oxov = np.asarray(eri_phys[:nocc, nocc+vloc0:nocc+vloc1, :nocc, nocc:])
+    eris.xvoo = np.asarray(eri_phys[nocc+vloc0:nocc+vloc1, nocc:, :nocc, :nocc])
+    eris.oxvv = np.asarray(eri_phys[:nocc, nocc+vloc0:nocc+vloc1, nocc:, nocc:])
+    eris.ovvx = np.asarray(eri_phys[:nocc, nocc:, nocc:, nocc+vloc0:nocc+vloc1])
+    eris.xvvv = np.asarray(eri_phys[nocc+vloc0:nocc+vloc1, nocc:, nocc:, nocc:])
+
+#    def __getitem__(self, string):
+#        idx = []
+#        for s in string:
+#            if s == 'o':
+#                idx_s = slice(0, nocc)
+#            elif s == 'v':
+#                idx_s = slice(nocc, nmo)
+#            elif s == 'x':
+#                idx_s = slice(nocc+vloc0, nocc+vloc1)
+#            else:
+#                raise ValueError
+#            idx.append(idx_s)
+#        return eri_phys[idx[0], idx[1], idx[2], idx[3]]
+#
+#    gccsd._PhysicistsERIs.__getitem__ = __getitem__
+    
+    f.close() 
+    comm.Barrier()
+    if rank == 0:
+        os.remove(fname)
 
     log.timer('CCSD integral transformation', *cput0)
     mycc._eris = eris
