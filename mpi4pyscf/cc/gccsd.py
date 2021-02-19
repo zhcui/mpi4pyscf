@@ -31,6 +31,7 @@ import scipy.linalg as la
 
 from pyscf import lib
 from pyscf import ao2mo
+from pyscf.ao2mo import _ao2mo
 from pyscf import scf
 from pyscf.cc import gccsd
 from pyscf import __config__
@@ -446,7 +447,7 @@ def _init_ccsd(ccsd_obj):
         mol, cc_attr = mpi.comm.bcast(None)
         ccsd_obj.mol = gto.mole.loads(mol)
         ccsd_obj.unpack_(cc_attr)
-    if False:  # If also to initialize cc._scf object
+    if True:  # If also to initialize cc._scf object
         if mpi.rank == 0:
             mpi.comm.bcast((ccsd_obj._scf.__class__, _pack_scf(ccsd_obj._scf)))
         else:
@@ -933,13 +934,21 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     log = logger.Logger(mycc.stdout, mycc.verbose)
     _sync_(mycc)
     eris = gccsd._PhysicistsERIs()
-
+    
     if rank == 0:
         eris._common_init_(mycc, mo_coeff)
         comm.bcast((eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy))
     else:
         eris.mol = mycc.mol
         eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy = comm.bcast(None)
+    
+    # if workers does not have _eri, bcast from root
+    if comm.allreduce(mycc._scf._eri is None, op=mpi.MPI.LOR):
+        if rank == 0:
+            mpi.bcast(mycc._scf._eri)
+        else:
+            mycc._scf._eri = mpi.bcast(None)
+    cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
 
     nocc = eris.nocc
     nao, nmo = eris.mo_coeff.shape
@@ -948,67 +957,178 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     vloc0, vloc1 = vlocs[rank]
     vseg = vloc1 - vloc0
     
-    fname = "gccsd_eri_tmp.h5"
-    if rank == 0:
-        # ZHC TODO use MPI to do ao2mo and build eri_phys.
-        f = h5py.File(fname, 'w')
-        mo_a = eris.mo_coeff[:nao//2]
-        mo_b = eris.mo_coeff[nao//2:]
-        eri  = ao2mo.kernel(mycc._scf._eri, (mo_a, mo_a, mo_b, mo_b))
-        lib.hermi_sum(eri, hermi=lib.SYMMETRIC, inplace=True)
-        eri += ao2mo.kernel(mycc._scf._eri, mo_a)
-        eri += ao2mo.kernel(mycc._scf._eri, mo_b)
+    plocs = [_task_location(nmo, task_id) for task_id in range(mpi.pool.size)]
+    ploc0, ploc1 = plocs[rank]
+    pseg = ploc1 - ploc0
+    
+    mo_a = eris.mo_coeff[:nao//2]
+    mo_b = eris.mo_coeff[nao//2:]
+    mo_seg_a = mo_a[:, ploc0:ploc1]
+    mo_seg_b = mo_b[:, ploc0:ploc1]
+    
+    fname = "gccsd_eri_tmp_%s.h5"%rank
+    f = h5py.File(fname, 'w')
+    eri_phys = f.create_dataset('eri_phys', (pseg, nmo, nmo, nmo), 'f8', 
+                                chunks=(pseg, 1, nmo, nmo))
+    
+    eri_a = ao2mo.incore.half_e1(mycc._scf._eri, (mo_seg_a, mo_a), compact=False)
+    eri_b = ao2mo.incore.half_e1(mycc._scf._eri, (mo_seg_b, mo_b), compact=False)
+    cput1 = log.timer('CCSD ao2mo half_e1:            ', *cput1)
 
-        eri_phys = f.create_dataset('eri_phys', (nmo, nmo, nmo, nmo), 'f8')
-        unit = nmo**3
-        mem_now = lib.current_memory()[0]
-        max_memory = max(0, mycc.max_memory - mem_now)
-        blksize = min(nmo, max(BLKMIN, int((max_memory*0.9e6/8)/unit)))
+    unit = pseg * nmo * nmo * 2
+    mem_now = lib.current_memory()[0]
+    max_memory = max(0, mycc.max_memory - mem_now)
+    blksize = min(nmo, max(BLKMIN, int((max_memory*0.9e6/8)/unit)))
 
-        for p0, p1 in lib.prange(0, nmo, blksize):
-            eri_slice = take_eri(eri, np.arange(p0, p1), np.arange(nmo),
-                                 np.arange(nmo), np.arange(nmo))
-            eri_phys[p0:p1]  = eri_slice.transpose(0, 2, 1, 3)
-            eri_phys[p0:p1] -= eri_slice.transpose(0, 2, 3, 1)
-            eri_slice = None
+    for p0, p1 in lib.prange(0, nmo, blksize):
+        klmosym_a, nkl_pair_a, mokl_a, klshape_a = \
+                ao2mo.incore._conc_mos(mo_a[:, p0:p1], mo_a, compact=False)
+        klmosym_b, nkl_pair_b, mokl_b, klshape_b = \
+                ao2mo.incore._conc_mos(mo_b[:, p0:p1], mo_b, compact=False)
+        
+        eri  = _ao2mo.nr_e2(eri_a, mokl_a, klshape_a, aosym='s4', mosym=klmosym_a)
+        eri += _ao2mo.nr_e2(eri_a, mokl_b, klshape_b, aosym='s4', mosym=klmosym_b)
+        eri += _ao2mo.nr_e2(eri_b, mokl_a, klshape_a, aosym='s4', mosym=klmosym_a)
+        eri += _ao2mo.nr_e2(eri_b, mokl_b, klshape_b, aosym='s4', mosym=klmosym_b)
+        
+        eri = eri.reshape(pseg, nmo, p1-p0, nmo)
+        eri_phys[:, p0:p1] = eri.transpose(0, 2, 1, 3) - eri.transpose(0, 2, 3, 1)
         eri = None
-        f.close()
+    eri_a = None
+    eri_b = None
     
+    f.close()
     comm.Barrier()
-    f = lib.H5TmpFile(filename=fname, mode='r')
-    #eris.feri1 = f
-    eri_phys = f["eri_phys"]
-    eris.oooo = np.asarray(eri_phys[:nocc, :nocc, :nocc, :nocc])
-    eris.ooox = np.asarray(eri_phys[:nocc, :nocc, :nocc, nocc+vloc0:nocc+vloc1])
-    eris.oxov = np.asarray(eri_phys[:nocc, nocc+vloc0:nocc+vloc1, :nocc, nocc:])
-    eris.xvoo = np.asarray(eri_phys[nocc+vloc0:nocc+vloc1, nocc:, :nocc, :nocc])
-    eris.oxvv = np.asarray(eri_phys[:nocc, nocc+vloc0:nocc+vloc1, nocc:, nocc:])
-    eris.ovvx = np.asarray(eri_phys[:nocc, nocc:, nocc:, nocc+vloc0:nocc+vloc1])
-    eris.xvvv = np.asarray(eri_phys[nocc+vloc0:nocc+vloc1, nocc:, nocc:, nocc:])
+    cput1 = log.timer('CCSD ao2mo nr_e2:              ', *cput1)
 
-#    def __getitem__(self, string):
-#        idx = []
-#        for s in string:
-#            if s == 'o':
-#                idx_s = slice(0, nocc)
-#            elif s == 'v':
-#                idx_s = slice(nocc, nmo)
-#            elif s == 'x':
-#                idx_s = slice(nocc+vloc0, nocc+vloc1)
-#            else:
-#                raise ValueError
-#            idx.append(idx_s)
-#        return eri_phys[idx[0], idx[1], idx[2], idx[3]]
-#
-#    gccsd._PhysicistsERIs.__getitem__ = __getitem__
+    o_idx = -1
+    v_idx = mpi.pool.size
+    for r, (p0, p1) in enumerate(plocs):
+        if p0 <= nocc - 1 < p1:
+            o_idx = r
+        if p0 <= nocc < p1:
+            v_idx = r
+            break
+    o_files = np.arange(mpi.pool.size)[:(o_idx+1)]
+    v_files = np.arange(mpi.pool.size)[v_idx:]
     
+    f = lib.H5TmpFile(filename="gccsd_eri_tmp_%s.h5"%rank, mode='r')
+    eri_phys = f["eri_phys"]
+    
+    # oooo
+    eris.oooo = np.empty((nocc, nocc, nocc, nocc))
+    if rank in o_files:
+        tmp = eri_phys[:min(nocc, ploc1)-ploc0, :nocc, :nocc, :nocc]
+    else:
+        tmp = np.zeros((0, nocc, nocc, nocc))
+    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
+        if eri_tmp.size > 0:
+            p1 = min(nocc, p1)
+            eris.oooo[p0:p1] = eri_tmp
+        eri_tmp = None
+    tmp = None
+    cput1 = log.timer('CCSD ao2mo oooo:               ', *cput1)
+
+    # ooox
+    eris.ooox = np.empty((nocc, nocc, nocc, vseg))
+    if rank in o_files:
+        tmp = eri_phys[:min(nocc, ploc1)-ploc0, :nocc, :nocc, nocc:]
+    else:
+        tmp = np.zeros((0, nocc, nocc, nvir))
+    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
+        if eri_tmp.size > 0:
+            p1 = min(nocc, p1)
+            eris.ooox[p0:p1] = eri_tmp[:, :, :, vloc0:vloc1]
+        eri_tmp = None
+    tmp = None
+    cput1 = log.timer('CCSD ao2mo ooox:               ', *cput1)
+    
+    # oxov
+    eris.oxov = np.empty((nocc, vseg, nocc, nvir))
+    if rank in o_files:
+        tmp = eri_phys[:min(nocc, ploc1)-ploc0, nocc:, :nocc, nocc:]
+    else:
+        tmp = np.zeros((0, nvir, nocc, nvir))
+    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
+        if eri_tmp.size > 0:
+            p1 = min(nocc, p1)
+            eris.oxov[p0:p1] = eri_tmp[:, vloc0:vloc1]
+        eri_tmp = None
+    tmp = None
+    cput1 = log.timer('CCSD ao2mo oxov:               ', *cput1)
+    
+    # oxvv and ovvx
+    eris.oxvv = np.empty((nocc, vseg, nvir, nvir))
+    eris.ovvx = np.empty((nocc, nvir, nvir, vseg))
+    if rank in o_files:
+        tmp = eri_phys[:min(nocc, ploc1)-ploc0, nocc:, nocc:, nocc:]
+    else:
+        tmp = np.zeros((0, nvir, nvir, nvir))
+    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
+        if eri_tmp.size > 0:
+            p1 = min(nocc, p1)
+            eris.oxvv[p0:p1] = eri_tmp[:, vloc0:vloc1]
+            eris.ovvx[p0:p1] = eri_tmp[:, :, :, vloc0:vloc1]
+        eri_tmp = None
+    tmp = None
+    cput1 = log.timer('CCSD ao2mo oxvv / ovvx:        ', *cput1)
+    
+    # xvoo
+    eris.xvoo = np.empty((vseg, nvir, nocc, nocc))
+    if rank in v_files:
+        tmp = eri_phys[max(ploc0, nocc)-ploc0:ploc1-ploc0, nocc:, :nocc, :nocc]
+    else:
+        tmp = np.zeros((0, nvir, nocc, nocc))
+    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
+        if eri_tmp.size > 0:
+            p0 = max(nocc, p0)
+            eris.xvoo[:, p0-nocc:p1-nocc] = -eri_tmp[:, vloc0:vloc1].transpose(1, 0, 2, 3)
+        eri_tmp = None
+    tmp = None
+    cput1 = log.timer('CCSD ao2mo xvoo:               ', *cput1)
+    
+    # xvvv
+    eris.xvvv = np.empty((vseg, nvir, nvir, nvir))
+    if rank in v_files:
+        tmp = eri_phys[max(ploc0, nocc)-ploc0:ploc1-ploc0, nocc:, nocc:, nocc:]
+    else:
+        tmp = np.zeros((0, nvir, nvir, nvir))
+    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
+        if eri_tmp.size > 0:
+            p0 = max(nocc, p0)
+            eris.xvvv[:, p0-nocc:p1-nocc] = -eri_tmp[:, vloc0:vloc1].transpose(1, 0, 2, 3)
+        eri_tmp = None
+    tmp = None
+    cput1 = log.timer('CCSD ao2mo xvvv:               ', *cput1)
+    
+    #for r in range(mpi.pool.size):
+    #    f = lib.H5TmpFile(filename="gccsd_eri_tmp_%s.h5"%r, mode='r')
+    #    eri_phys = f["eri_phys"]
+    #    if r in o_files:
+    #        p0, p1 = plocs[r]
+    #        p1 = min(p1, nocc)
+    #        pseg = p1 - p0
+    #        if pseg > 0:
+    #            eris.oooo[p0:p1] = eri_phys[:pseg, :nocc, :nocc, :nocc]
+    #            eris.ooox[p0:p1] = eri_phys[:pseg, :nocc, :nocc, nocc+vloc0:nocc+vloc1]
+    #            eris.oxov[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, :nocc, nocc:]
+    #            eris.oxvv[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, nocc:, nocc:]
+    #            eris.ovvx[p0:p1] = eri_phys[:pseg, nocc:, nocc:, nocc+vloc0:nocc+vloc1]
+    #    
+    #    if r in v_files:
+    #        p00, p10 = plocs[r]
+    #        p0 = max(p00, nocc+vloc0)
+    #        p1 = min(p10, nocc+vloc1)
+    #        pseg = p1 - p0
+    #        if pseg > 0:
+    #            eris.xvoo[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, :nocc, :nocc]
+    #            eris.xvvv[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, nocc:, nocc:]
+
     f.close() 
     comm.Barrier()
-    if rank == 0:
-        os.remove(fname)
-
-    log.timer('CCSD integral transformation', *cput0)
+    os.remove("gccsd_eri_tmp_%s.h5"%rank)
     mycc._eris = eris
+    log.timer('CCSD integral transformation   ', *cput0)
     return eris
 
 if __name__ == '__main__':
