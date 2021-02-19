@@ -140,6 +140,7 @@ Wvvvv_ref = imd.cc_Wvvvv(t1_cc_ref, t2_cc_ref, eris_ref)
 Wovvo_ref = imd.cc_Wovvo(t1_cc_ref, t2_cc_ref, eris_ref)
 
 # test class
+mf = mf.newton()
 mycc = mpicc.GCCSD(mf)
 mycc.conv_tol = 1e-8
 mycc.conv_tol_normt = 1e-6

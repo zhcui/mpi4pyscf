@@ -449,6 +449,9 @@ def _init_ccsd(ccsd_obj):
         ccsd_obj.unpack_(cc_attr)
     if True:  # If also to initialize cc._scf object
         if mpi.rank == 0:
+            if hasattr(ccsd_obj._scf, '_scf'):
+                # ZHC FIXME a hack, newton need special treatment to broadcast
+                ccsd_obj._scf = ccsd_obj._scf._scf
             mpi.comm.bcast((ccsd_obj._scf.__class__, _pack_scf(ccsd_obj._scf)))
         else:
             mf_cls, mf_attr = mpi.comm.bcast(None)
