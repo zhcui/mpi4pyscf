@@ -433,7 +433,9 @@ def init_amps(mycc, eris=None):
     mycc.emp2 = comm.allreduce(emp2)
     logger.info(mycc, 'Init t2, MP2 energy = %.15g', mycc.emp2)
     logger.timer(mycc, 'init mp2', *time0)
-    return mycc.emp2, t1T.T, t2T.transpose(2, 3, 0, 1)
+    mycc.t1 = t1T.T
+    mycc.t2 = t2T.transpose(2, 3, 0, 1)
+    return mycc.emp2, mycc.t1, mycc.t2
 
 def _init_ccsd(ccsd_obj):
     from pyscf import gto
@@ -817,116 +819,6 @@ CCSD = GCCSD
 # ************************************************************************
 # ao2mo routines
 # ************************************************************************
-
-def tril_idx(i, j):
-    """
-    For a pair / list of tril matrix indices i, j,
-    find the corresponding compound indices ij in the tril array.
-    
-    Args:
-        i, j
-
-    Returns:
-        ij: compound indices.
-    """
-    ij  = np.maximum(i, j)
-    ij *= (ij + 1)
-    ij //= 2
-    ij += np.minimum(i, j)
-    return ij
-
-def tril_take_idx(idx_list1, idx_list2=None, compact=False):
-    """
-    Take a submatrix from tril array, 
-
-    If one list is provide:
-    return the corresponding compound indices in the tril array.
-        e.g. idx_list = [1, 3]
-              X     X
-          00 01 02 03
-        X 10 11 12 13
-          20 21 22 23
-        X 30 31 32 33
-              X     X
-          0   *  *  *
-        X 1   2  *  *
-          3   4  5  *
-        X 6   7  8  9
-        will return 2, 7, 9 (if compact), else 2, 7, 7, 9. 
-        i.e. the indices of [(1, 1), (3, 1), (3, 3)].
-
-    If two lists are provide:
-    will return a set of indices for generating a 2D matrix.
-        e.g. idx_list1 = [1, 3], idx_list2 = [1, 2]
-              X  X   
-          00 01 02 03
-        X 10 11 12 13
-          20 21 22 23
-        X 30 31 32 33
-              X  X   
-          0   *  *  *
-        X 1   2  *  *
-          3   4  5  *
-        X 6   7  8  9
-        will return 2, 4, 7, 8,
-        i.e. the indices of [(1, 1), (1, 2), (3, 1), (3, 2)].
-    """
-    if idx_list2 is None:
-        idx_list2 = idx_list1
-    if compact:
-        l = len(idx_list1)
-        x = np.tri(l, l, dtype=bool).ravel()
-        idx = tril_idx(*lib.cartesian_prod((idx_list1, idx_list1))[x].T)
-    else:
-        idx = tril_idx(*lib.cartesian_prod((idx_list1, idx_list2)).T)
-    return idx
-
-def take_eri(eri, list1, list2, list3, list4, compact=False):
-    """
-    Take sub block of ERI.
-    
-    Args:
-        eri: 1-fold symmetrized ERI, (nao, nao, nao, nao)
-          or 4-fold symmetrized ERI, (nao_pair, nao_pair)
-          or 8-fold symmetrized ERI, (nao_pair_pair,) 
-        list1, list2, list3, list4: list of indices, can be negative.
-        compact: only return the compact form of eri, only valid when lists
-                 obey the permutation symmetry (only list1 is used)
-
-    Returns:
-        res: (len(list1), len(list2), len(list3), len(list4)) if not compact
-             else: compact shape depend only on list1 and list3.
-    """
-    if eri.ndim == 2: # 4-fold
-        nao_a = int(np.sqrt(eri.shape[-2] * 2))
-        nao_b = int(np.sqrt(eri.shape[-1] * 2))
-        list1 = np.asarray(list1) % nao_a
-        list2 = np.asarray(list2) % nao_a
-        list3 = np.asarray(list3) % nao_b
-        list4 = np.asarray(list4) % nao_b
-        idx1 = tril_take_idx(list1, list2, compact=compact)
-        idx2 = tril_take_idx(list3, list4, compact=compact)
-        if compact:
-            res = eri[np.ix_(idx1, idx2)]
-        else:
-            res = eri[np.ix_(idx1, idx2)].reshape(len(list1), len(list2), \
-                    len(list3), len(list4))
-    elif eri.ndim == 1: # 8-fold
-        nao = int(np.sqrt(int(np.sqrt(eri.shape[-1] * 2)) * 2))
-        list1 = np.asarray(list1) % nao
-        list2 = np.asarray(list2) % nao
-        list3 = np.asarray(list3) % nao
-        list4 = np.asarray(list4) % nao
-        idx1 = tril_take_idx(list1, list2, compact=compact)
-        idx2 = tril_take_idx(list3, list4, compact=compact)
-        if compact:
-            res = eri[tril_take_idx(idx1, idx2, compact=compact)]
-        else:
-            res = eri[tril_take_idx(idx1, idx2)].reshape(len(list1), len(list2), \
-                    len(list3), len(list4))
-    else: # 1-fold
-        res = eri[np.ix_(list1, list2, list3, list4)]
-    return res
 
 @mpi.parallel_call
 def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
