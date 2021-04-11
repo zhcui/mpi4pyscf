@@ -49,6 +49,10 @@ from mpi4pyscf.cc import gccsd_rdm
 comm = mpi.comm
 rank = mpi.rank
 
+einsum = lib.einsum
+#from functools import partial
+#einsum = partial(np.einsum, optimize=True)
+
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
 
@@ -89,15 +93,15 @@ def update_amps(mycc, t1, t2, eris):
     t1Tnew  = np.dot(Fvv, t1T)
     t1Tnew -= np.dot(t1T, Foo)
 
-    tmp  = np.einsum('aeim, me -> ai', t2T, Fov)
-    tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov)
+    tmp  = np.einsum('aeim, me -> ai', t2T, Fov, optimize=True)
+    tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov, optimize=True)
     tmp  = mpi.allgather(tmp)
 
-    tmp2  = lib.einsum('eamn, mnie -> ai', t2T, eris.ooox)
-    tmp2 += lib.einsum('efim, mafe -> ai', t2T, eris.ovvx)
+    tmp2  = einsum('eamn, mnie -> ai', t2T, eris.ooox)
+    tmp2 += einsum('efim, mafe -> ai', t2T, eris.ovvx)
     tmp2 *= 0.5
     tmp2  = mpi.allreduce(tmp2)
-    tmp += tmp2
+    tmp  += tmp2
     tmp2  = None
 
     t1Tnew += tmp
@@ -105,7 +109,7 @@ def update_amps(mycc, t1, t2, eris):
 
     # T2 equation
     Ftmp = Fvv - 0.5 * np.dot(t1T, Fov)
-    t2Tnew = lib.einsum('aeij, be -> abij', t2T, Ftmp)
+    t2Tnew = einsum('aeij, be -> abij', t2T, Ftmp)
     t2T_tmp = mpi.alltoall([t2Tnew[:, p0:p1] for p0, p1 in vlocs],
                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
@@ -115,7 +119,7 @@ def update_amps(mycc, t1, t2, eris):
     t2T_tmp = None
 
     Ftmp = Foo + 0.5 * np.dot(Fov, t1T)
-    tmp = lib.einsum('abim, mj -> abij', t2T, Ftmp)
+    tmp = einsum('abim, mj -> abij', t2T, Ftmp)
     t2Tnew -= tmp
     t2Tnew += tmp.transpose(0, 1, 3, 2)
     tmp = None
@@ -123,24 +127,23 @@ def update_amps(mycc, t1, t2, eris):
     t2Tnew += np.asarray(eris.xvoo)
     tauT = make_tauT(t1T, t2T, vlocs=vlocs)
     Woooo = cc_Woooo(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
-    t2Tnew += lib.einsum('abmn, mnij -> abij', tauT, Woooo * 0.5)
+    t2Tnew += einsum('abmn, mnij -> abij', tauT, Woooo * 0.5)
     Woooo = None
 
-    Wvvvv = cc_Wvvvv(t1T, t2T, eris, tauT=tauT, vlocs=vlocs, full_vvvv=True)
+    Wvvvv = cc_Wvvvv(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
-        t2Tnew += 0.5 * lib.einsum('abef, efij -> abij', Wvvvv[:, :, p0:p1], tauT_tmp)
+        t2Tnew += 0.5 * einsum('abef, efij -> abij', Wvvvv[:, :, p0:p1], tauT_tmp)
         tauT_tmp = None
     Wvvvv = None
     tauT = None
 
-    #tmp = lib.einsum('mbje, ei -> bmij', eris["oxov"], t1T) # [b]mij
-    tmp = lib.einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
+    tmp = einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
     tmp = mpi.allgather(tmp) # bmij
-    tmp = lib.einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
+    tmp = einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
 
     Wvovo = cc_Wovvo(t1T, t2T, eris, vlocs=vlocs).transpose(2, 0, 1, 3)
     for task_id, w_tmp, p0, p1 in _rotate_vir_block(Wvovo, vlocs=vlocs):
-        tmp += lib.einsum('aeim, embj -> abij', t2T[:, p0:p1], w_tmp)
+        tmp += einsum('aeim, embj -> abij', t2T[:, p0:p1], w_tmp)
         w_tmp = None
     Wvovo = None
 
@@ -154,20 +157,11 @@ def update_amps(mycc, t1, t2, eris):
         tmp = None
     tmpT = None
 
-    #eris_vvvo = np.array(eris.vvvo)
-    #for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vvvo, vlocs=vlocs):
-    #    tmp = lib.einsum('ei, baej -> abij', -t1T[p0:p1], eri_tmp[:, :, vloc0:vloc1])
-    #    t2Tnew += tmp
-    #    t2Tnew -= tmp.transpose(0, 1, 3, 2)
-    #    tmp = None
-    #eris_vovv = None
-    # vxvo ovvx
-    # baej jeba
-    tmp = lib.einsum('ei, jeba -> abij', t1T, eris.ovvx)
+    tmp = einsum('ei, jeba -> abij', t1T, eris.ovvx)
     t2Tnew += tmp
     t2Tnew -= tmp.transpose(0, 1, 3, 2)
 
-    tmp = lib.einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
+    tmp = einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
     t2Tnew += tmp
     tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
                         split_recvbuf=True)
@@ -202,7 +196,7 @@ def make_tauT(t1T, t2T, fac=1, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     vloc0, vloc1 = vlocs[rank]
-    tauT = np.einsum('ai, bj -> abij', t1T[vloc0:vloc1] * (fac * 0.5), t1T)
+    tauT = np.einsum('ai, bj -> abij', t1T[vloc0:vloc1] * (fac * 0.5), t1T, optimize=True)
     tauT = tauT - tauT.transpose(0, 1, 3, 2)
     ##:tauT = tauT - tauT.transpose(1, 0, 2, 3)
     tauT_tmp = mpi.alltoall([tauT[:, p0:p1] for p0, p1 in vlocs], split_recvbuf=True)
@@ -221,7 +215,7 @@ def cc_Fov(t1T, eris, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     fov  = eris.fock[:nocc, nocc:]
-    Fme  = np.einsum('efmn, fn -> em', eris.xvoo, t1T)
+    Fme  = np.einsum('efmn, fn -> em', eris.xvoo, t1T, optimize=True)
     Fme  = mpi.allgather(Fme).T
     Fme += fov
     return Fme
@@ -242,16 +236,11 @@ def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     fvv = eris.fock[nocc+vloc0:nocc+vloc1, nocc:]
     Fea = fvv - 0.5 * np.dot(fvo[vloc0:vloc1], t1T.T)
 
-    #for task_id, tauT_tilde, p0, p1 in _rotate_vir_block(tauT_tilde, vlocs=vlocs):
-    #    Fea += 0.5 * lib.einsum('efmn, famn -> ea', eris["xvoo"][:, p0:p1], tauT_tilde)
-    #tauT_tilde = None
-    Fae = (-0.5) * lib.einsum('femn, famn -> ae', eris.xvoo, tauT_tilde)
+    Fae = (-0.5) * einsum('femn, famn -> ae', eris.xvoo, tauT_tilde)
     Fae = mpi.allreduce(Fae)
     tauT_tilde = None
     
-    # xvvo ovvx
-    # efam mafe
-    Fea += np.einsum('mafe, fm -> ea', eris.ovvx, t1T)
+    Fea += np.einsum('mafe, fm -> ea', eris.ovvx, t1T, optimize=True)
     Fae += mpi.allgather(Fea).T
     return Fae
 
@@ -264,9 +253,9 @@ def cc_Foo(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
         tauT_tilde = make_tauT(t1T, t2T, fac=0.5, vlocs=vlocs)
     vloc0, vloc1 = vlocs[rank]
     
-    Fmi  = 0.5 * lib.einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
+    Fmi  = 0.5 * einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
     tauT_tilde = None
-    Fmi += np.einsum('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1])
+    Fmi += np.einsum('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1], optimize=True)
     Fmi  = mpi.allreduce(Fmi)
 
     fov = eris.fock[:nocc, nocc:]
@@ -285,9 +274,9 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
     if tauT is None:
         tauT = make_tauT(t1T, t2T, vlocs=vlocs)
 
-    Wmnij = lib.einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
+    Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
     tauT = None
-    tmp = lib.einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
+    tmp = einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
     Wmnij += tmp
     Wmnij -= tmp.transpose(0, 1, 3, 2)
     tmp = None
@@ -295,12 +284,9 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
     Wmnij += eris.oooo
     return Wmnij
 
-def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
+def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None):
     """
     Wvvvv intermidiates.
-    Returns:
-        Wvvvv: if full_vvvv, (nvir_seg, nvir, nvir, nvir)
-               else: (nvir_seg, nvir, nvir_seg, nvir)
     """
     # ZHC TODO make Wvvvv outcore
     nvir_seg, nvir, nocc, _ = t2T.shape
@@ -312,21 +298,17 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
         tauT = make_tauT(t1T, t2T, vlocs=vlocs)
 
     Wabef = np.empty((vloc1-vloc0, nvir, nvir, nvir))
-    # ZHC FIXME here, I don't understand why this is needed.
-    #eris_vvoo = np.empty((vloc1-vloc0, nvir, nocc, nocc))
-    #eris_vvoo[:] = eris.xvoo
-    #eris_vvoo = eris["xvoo"]
     eris_vvoo = eris.xvoo
 
     tauT = tauT * 0.25
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vvoo, vlocs=vlocs):
-        Wabef[:, :, p0:p1] = lib.einsum('abmn, efmn -> abef', tauT, eri_tmp)
+        Wabef[:, :, p0:p1] = einsum('abmn, efmn -> abef', tauT, eri_tmp)
         eri_tmp = None
     eris_vvoo = None
     tauT = None
 
     Wabef += np.asarray(eris.xvvv)
-    tmp = lib.einsum('bm, mafe -> abfe', t1T, eris.oxvv)
+    tmp = einsum('bm, mafe -> abfe', t1T, eris.oxvv)
     Wabef += tmp
 
     tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
@@ -336,8 +318,6 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None, full_vvvv=False):
         Wabef[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
         tmp = None
 
-    if not full_vvvv:
-        Wabef = Wabef[:, :, vloc0:vloc1]
     return Wabef
 
 def cc_Wovvo(t1T, t2T, eris, vlocs=None):
@@ -349,25 +329,14 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
 
-    Wmbej = lib.einsum('efmn, fj -> mnej', eris.xvoo, -t1T)
-    Wmbej = lib.einsum('mnej, bn -> mbej', Wmbej, t1T)
+    Wmbej = einsum('efmn, fj -> mnej', eris.xvoo, -t1T)
+    Wmbej = einsum('mnej, bn -> mbej', Wmbej, t1T)
     
-    # ovxv ovvx
-    # mbef mbfe
-    Wmbej -= lib.einsum('mbfe, fj -> mbej', eris.ovvx, t1T)
-
-    #tmp = lib.einsum('efbm, fj -> bemj', eris["vvvo"], -t1T)
-    #tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-    #                    split_recvbuf=True)
-    #for task_id, (p0, p1) in enumerate(vlocs):
-    #    tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
-    #    Wmbej[:, p0:p1] += tmp.transpose(2, 0, 1, 3)
-    #    tmp = None
-    #tmpT = None
-    Wmbej += lib.einsum('bn, mnje -> mbej', t1T, eris.ooox)
+    Wmbej -= einsum('mbfe, fj -> mbej', eris.ovvx, t1T)
+    Wmbej += einsum('bn, mnje -> mbej', t1T, eris.ooox)
 
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        Wmbej -= 0.5 * lib.einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
+        Wmbej -= 0.5 * einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
         t2T_tmp = None
 
     Wmbej -= np.asarray(eris.oxov.transpose(2, 3, 1, 0))
@@ -389,14 +358,14 @@ def energy(mycc, t1=None, t2=None, eris=None):
     fock = eris.fock
     loc0, loc1 = _task_location(nvir)
     if rank == 0:
-        e = np.einsum('ia, ia', fock[:nocc, nocc:], t1)
+        e = np.einsum('ia, ia', fock[:nocc, nocc:], t1, optimize=True)
     else:
         e = 0.0
     max_memory = mycc.max_memory - lib.current_memory()[0]
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
         eris_vvoo = eris.xvoo[p0:p1]
-        e += 0.25 * np.einsum('ijab, abij', t2[:, :, p0:p1], eris_vvoo)
+        e += 0.25 * np.einsum('ijab, abij', t2[:, :, p0:p1], eris_vvoo, optimize=True)
         e += 0.50 * np.einsum('ia, jb, abij', t1[:, loc0+p0:loc0+p1], t1,
                               eris_vvoo, optimize=True)
     e = comm.allreduce(e)
@@ -427,7 +396,7 @@ def init_amps(mycc, eris=None):
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
         eris_vvoo = eris.xvoo[p0:p1]
         t2T[p0:p1] = (eris_vvoo / lib.direct_sum('ia, jb -> abij', eia[:, loc0+p0:loc0+p1], eia))
-        emp2 += 0.25 * np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj()).real
+        emp2 += 0.25 * np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj(), optimize=True).real
         eris_vvoo = None
 
     mycc.emp2 = comm.allreduce(emp2)
@@ -555,7 +524,7 @@ def test_cc_Wvvvv(mycc, t1T=None, t2T=None, ref=None):
     if eris is None:
         mycc.ao2mo()
         eris = mycc._eris
-    Wvvvv = mpi.gather(cc_Wvvvv(t1T, t2T, eris, full_vvvv=True))
+    Wvvvv = mpi.gather(cc_Wvvvv(t1T, t2T, eris))
     if rank == 0:
         assert la.norm(Wvvvv - ref) < 1e-10
 

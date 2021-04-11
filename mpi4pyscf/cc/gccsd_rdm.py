@@ -26,8 +26,9 @@ from mpi4pyscf.lib import diis
 from mpi4pyscf.cc.ccsd import (_task_location, _sync_, _diff_norm, 
                                _rotate_vir_block)
 
-#einsum = np.einsum
 einsum = lib.einsum
+#from functools import partial
+#einsum = partial(np.einsum, optimize=True)
 
 comm = mpi.comm
 rank = mpi.rank
@@ -40,21 +41,16 @@ def _gamma1_intermediates(mycc, t1, t2, l1, l2):
     t1 = t2 = l1 = l2 = None
 
     doo  = -np.dot(l1T.T, t1T)
-    #doo -= lib.einsum('imef, jmef -> ij', l2, t2) * 0.5
-    doo -= mpi.allreduce(lib.einsum('efim, efjm -> ij', l2T, t2T) * 0.5)
+    doo -= mpi.allreduce(einsum('efim, efjm -> ij', l2T, t2T) * 0.5)
 
     dvv  = np.dot(t1T, l1T.T)
-    #dvv += lib.einsum('mnea, mneb -> ab', t2, l2) * 0.5
-    dvv += mpi.allreduce(lib.einsum('eamn, ebmn -> ab', t2T, l2T) * 0.5)
+    dvv += mpi.allreduce(einsum('eamn, ebmn -> ab', t2T, l2T) * 0.5)
 
-    #xt1  = lib.einsum('mnef, inef -> mi', l2, t2) * 0.5
-    xt1  = mpi.allreduce(lib.einsum('efmn, efin -> mi', l2T, t2T) * 0.5)
-    #xt2  = lib.einsum('mnfa, mnfe -> ae', t2, l2) * 0.5
-    xt2  = mpi.allreduce(lib.einsum('famn, femn -> ae', t2T, l2T) * 0.5)
+    xt1  = mpi.allreduce(einsum('efmn, efin -> mi', l2T, t2T) * 0.5)
+    xt2  = mpi.allreduce(einsum('famn, femn -> ae', t2T, l2T) * 0.5)
     xt2 += np.dot(t1T, l1T.T)
 
-    #dvo  = lib.einsum('imae, me -> ai', t2, l1)
-    dvo  = mpi.allgather(lib.einsum('aeim, em -> ai', t2T, l1T))
+    dvo  = mpi.allgather(np.einsum('aeim, em -> ai', t2T, l1T, optimize=True))
     dvo -= np.dot(t1T, xt1)
     dvo -= np.dot(xt2, t1T)
     dvo += t1T
@@ -67,7 +63,7 @@ def _gamma1_intermediates(mycc, t1, t2, l1, l2):
 # dm2[q,p,s,r] = <p^\dagger r^\dagger s q> is assumed in this function.
 # It changes to dm2[p,q,r,s] = <p^\dagger r^\dagger s q> in _make_rdm2
 def _gamma2_intermediates(mycc, t1, t2, l1, l2):
-    tau = t2 + np.einsum('ia, jb -> ijab', t1, t1 * 2.0)
+    tau = t2 + np.einsum('ia, jb -> ijab', t1, t1 * 2.0, optimize=True)
     miajb = einsum('ikac, kjcb -> iajb', l2, t2)
 
     goovv = 0.25 * (l2.conj() + tau)
@@ -77,9 +73,9 @@ def _gamma2_intermediates(mycc, t1, t2, l1, l2):
     goovv += einsum('cb,ijca->ijab', tmp, t2) * .5
     tmp = einsum('kc,jc->kj', l1, t1)
     goovv += einsum('kiab,kj->ijab', tau, tmp) * .5
-    tmp = np.einsum('ldjd->lj', miajb)
+    tmp = np.einsum('ldjd->lj', miajb, optimize=True)
     goovv -= einsum('lj,liba->ijab', tmp, tau) * .25
-    tmp = np.einsum('ldlb->db', miajb)
+    tmp = np.einsum('ldlb->db', miajb, optimize=True)
     goovv -= einsum('db,jida->ijab', tmp, tau) * .25
     goovv -= einsum('ldia,ljbd->ijab', miajb, tau) * .5
     tmp = einsum('klcd,ijcd->ijkl', l2, tau) * .25**2
@@ -91,19 +87,19 @@ def _gamma2_intermediates(mycc, t1, t2, l1, l2):
 
     gooov  = einsum('jkba,ib->jkia', tau, l1) * -0.25
     gooov += einsum('iljk,la->jkia', goooo, t1)
-    tmp = np.einsum('icjc->ij', miajb) * .25
+    tmp = np.einsum('icjc->ij', miajb, optimize=True) * .25
     gooov -= einsum('ij,ka->jkia', tmp, t1)
     gooov += einsum('icja,kc->jkia', miajb, t1) * .5
     gooov = gooov.conj()
     gooov += einsum('jkab,ib->jkia', l2, t1) * .25
 
     govvo  = einsum('ia,jb->ibaj', l1, t1)
-    govvo += np.einsum('iajb->ibaj', miajb)
+    govvo += np.einsum('iajb->ibaj', miajb, optimize=True)
     govvo -= einsum('ikac,jc,kb->ibaj', l2, t1, t1)
 
     govvv  = einsum('ja,ijcb->iacb', l1, tau) * .25
     govvv += einsum('bcad,id->iabc', gvvvv, t1)
-    tmp = np.einsum('kakb->ab', miajb) * .25
+    tmp = np.einsum('kakb->ab', miajb, optimize=True) * .25
     govvv += einsum('ab,ic->iacb', tmp, t1)
     govvv += einsum('kaib,kc->iabc', miajb, t1) * .5
     govvv = govvv.conj()
@@ -138,39 +134,39 @@ def _gamma2_outcore(mycc, t1, t2, l1, l2, h5fobj):
     vloc0, vloc1 = vlocs[rank]
     assert vloc1 - vloc0 == nvir_seg
     
-    tauT = t2T + np.einsum('ia, jb -> ijab', t1T[vloc0:vloc1] * 2.0, t1T)
+    tauT = t2T + np.einsum('ia, jb -> ijab', t1T[vloc0:vloc1] * 2.0, t1T, optimize=True)
     
-    #miajb = lib.einsum('acik, cbkj -> iajb', l2T, t2T) # i[a]jb
+    #miajb = einsum('acik, cbkj -> iajb', l2T, t2T) # i[a]jb
     mbjai = 0.0 # [b]jai
     for task_id, l2T_tmp, p0, p1 in _rotate_vir_block(l2T, vlocs=vlocs):
-        mbjai += lib.einsum('bckj, caik -> bjai', t2T[:, p0:p1], l2T_tmp)
+        mbjai += einsum('bckj, caik -> bjai', t2T[:, p0:p1], l2T_tmp)
         l2T_tmp = None
 
     gvvoo = 0.25 * (l2T.conj() + tauT)
-    tmp = lib.einsum('ck, acki -> ai', l1T, t2T)
-    gvvoo -= np.einsum('ai, bj -> abij', tmp, t1T)
+    tmp = einsum('ck, acki -> ai', l1T, t2T)
+    gvvoo -= np.einsum('ai, bj -> abij', tmp, t1T, optimize=True)
     
     tmp = np.dot(l1T, t1T.T)
-    gvvoo -= lib.einsum('cb, acij -> abij', tmp * 0.5, t2)
+    gvvoo -= einsum('cb, acij -> abij', tmp * 0.5, t2)
     
     tmp = np.dot(l1T.T, t1T)
-    gvvoo += lib.einsum('abki, kj -> abij', tauT, tmp * 0.5)
+    gvvoo += einsum('abki, kj -> abij', tauT, tmp * 0.5)
 
     #tmp_oo = mpi.allreduce(np.einsum('ldjd -> lj', miajb[:, :, :, vloc0:vloc1]))
-    tmp_oo = mpi.allreduce(np.einsum('djdl -> lj', mbjai[:, :, vloc0:vloc1]))
-    gvvoo += lib.einsum('lj, abli -> abij', tmp_oo * 0.25, tauT)
+    tmp_oo = mpi.allreduce(np.einsum('djdl -> lj', mbjai[:, :, vloc0:vloc1], optimize=True))
+    gvvoo += einsum('lj, abli -> abij', tmp_oo * 0.25, tauT)
 
     #tmp_vv = mpi.allgather(np.einsum('ldlb -> db', miajb))
-    tmp_vv = mpi.allgather(np.einsum('bldl -> bd', mbjai)).T # db
-    gvvoo += lib.einsum('db, adji -> abij', tmp * 0.25, tauT)
-    #gvvoo -= lib.einsum('ldia, bdlj -> abij', miajb, tauT) * 0.5
+    tmp_vv = mpi.allgather(np.einsum('bldl -> bd', mbjai, optimize=True)).T # db
+    gvvoo += einsum('db, adji -> abij', tmp * 0.25, tauT)
+    #gvvoo -= einsum('ldia, bdlj -> abij', miajb, tauT) * 0.5
     # gvvvv shape (nvir, nvir, nvir_seg, nvir)
     gvvvv = fswap.create_dataset('gvvvv', (nvir, nvir, nvir_seg, nvir), t1.dtype,
                                  chunks=(nvir, nvir, 1, nvir))
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
-        #gvvoo[:, p0:p1] -= lib.einsum('ldia, bdlj -> abij', miajb[:, :, :, vloc0:vloc1], tauT_tmp) * 0.5
-        gvvoo[:, p0:p1] -= lib.einsum('aidl, bdlj -> abij', mbjai, tauT_tmp) * 0.5
-        gvvvv[p0:p1] = lib.einsum('abij, cdij -> abcd', tauT_tmp, l2T * 0.125)
+        #gvvoo[:, p0:p1] -= einsum('ldia, bdlj -> abij', miajb[:, :, :, vloc0:vloc1], tauT_tmp) * 0.5
+        gvvoo[:, p0:p1] -= einsum('aidl, bdlj -> abij', mbjai, tauT_tmp) * 0.5
+        gvvvv[p0:p1] = einsum('abij, cdij -> abcd', tauT_tmp, l2T * 0.125)
         tauT_tmp = None
 
     #dvvvv = gvvvv.transpose(0,2,1,3) - gvvvv.transpose(0,3,1,2)
@@ -182,8 +178,8 @@ def _gamma2_outcore(mycc, t1, t2, l1, l2, h5fobj):
     
 
 
-    tmp = lib.einsum('cdkl, cdij -> klij', l2T, tauT) * 0.25**2
-    gvvoo += lib.einsum('abkl, klij -> abij', tauT, tmp)
+    tmp = einsum('cdkl, cdij -> klij', l2T, tauT) * 0.25**2
+    gvvoo += einsum('abkl, klij -> abij', tauT, tmp)
     gvvoo = gvvoo.conj()
     tmp = None
 
@@ -207,18 +203,18 @@ def _gamma2_outcore(mycc, t1, t2, l1, l2, h5fobj):
     gvvooT = None
     dovov *= 0.5
 
-    #gvvvv = lib.einsum('abij, cdij -> abcd', tauT, l2T * 0.125) #see line 170
-    goooo = mpi.allreduce(lib.einsum('abkl, abij -> klij', l2T, tauT) * 0.125)
+    #gvvvv = einsum('abij, cdij -> abcd', tauT, l2T * 0.125) #see line 170
+    goooo = mpi.allreduce(einsum('abkl, abij -> klij', l2T, tauT) * 0.125)
 
-    gvooo  = lib.einsum('abjk, bi -> aikj', tauT, l1T * 0.25)
-    gvooo += lib.einsum('al, iljk -> aikj', t1T, goooo)
+    gvooo  = einsum('abjk, bi -> aikj', tauT, l1T * 0.25)
+    gvooo += einsum('al, iljk -> aikj', t1T, goooo)
 
     tmp = tmp_oo * 0.25
     tmp_oo = None
-    gvooo -= np.einsum('ak, ij -> aikj', t1T, tmp)
-    gvooo += lib.einsum('ajci, ck -> aikj', mbjai, t1T * 0.5)
+    gvooo -= np.einsum('ak, ij -> aikj', t1T, tmp, optimize=True)
+    gvooo += einsum('ajci, ck -> aikj', mbjai, t1T * 0.5)
     gvooo = gvooo.conj()
-    gvooo += lib.einsum('abjk, bi -> aikj', l2T, t1T * 0.25)
+    gvooo += einsum('abjk, bi -> aikj', l2T, t1T * 0.25)
     
     # jkia -> jika
     # jkia -> kija
@@ -232,12 +228,12 @@ def _gamma2_outcore(mycc, t1, t2, l1, l2, h5fobj):
     gvooo = None
     
     # i[b]aj
-    govvo  = np.einsum('ai, bj -> ibaj', l1T, t1T[vloc0:vloc1])
-    govvo += np.einsum('bjai -> ibaj', mbjai)
-    #govvo -= lib.einsum('acik, cj, bk -> ibaj', l2T, t1T, t1T)
-    tmp = lib.einsum('acik, cj -> aikj', l2T, t1T)
+    govvo  = np.einsum('ai, bj -> ibaj', l1T, t1T[vloc0:vloc1], optimize=True)
+    govvo += np.einsum('bjai -> ibaj', mbjai, optimize=True)
+    #govvo -= einsum('acik, cj, bk -> ibaj', l2T, t1T, t1T)
+    tmp = einsum('acik, cj -> aikj', l2T, t1T)
     for task_id, tmp_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=vlocs):
-        govvo[:, :, p0:p1] -= lib.einsum('aikj, bk -> ibaj', tmp_tmp, t1T[vloc0:vloc1])
+        govvo[:, :, p0:p1] -= einsum('aikj, bk -> ibaj', tmp_tmp, t1T[vloc0:vloc1])
         tmp_tmp = None
     tmp = None
     dovvo = h5fobj.create_dataset('dovvo', (nocc, nvir_seg, nvir, nocc), t1.dtype,
@@ -257,14 +253,14 @@ def _gamma2_outcore(mycc, t1, t2, l1, l2, h5fobj):
     govvoT = None 
     
     # govvv has shape ia[b]c
-    govvv  = lib.einsum('aj, cbij -> iacb', l1T * 0.25, tauT)
-    govvv += lib.einsum('bcad, di -> iabc', fswap["gvvvv"], t1T)
+    govvv  = einsum('aj, cbij -> iacb', l1T * 0.25, tauT)
+    govvv += einsum('bcad, di -> iabc', fswap["gvvvv"], t1T)
     tmp = tmp_vv * 0.25
     tmp_vv = None
-    govvv += np.einsum('ab, ci -> iacb', tmp, t1T[vloc0:vloc1])
-    govvv += lib.einsum('biak, ck -> iabc', mbjai, t1T * 0.5)
+    govvv += np.einsum('ab, ci -> iacb', tmp, t1T[vloc0:vloc1], optimize=True)
+    govvv += einsum('biak, ck -> iabc', mbjai, t1T * 0.5)
     govvv = govvv.conj()
-    govvv += lib.einsum('bcij, aj -> iabc', l2T, t1T * 0.25)
+    govvv += einsum('bcij, aj -> iabc', l2T, t1T * 0.25)
     
     # ia[b]c -> i[b]ac
     # ia[b]c -> ica[b]
@@ -377,7 +373,7 @@ def _make_rdm1(mycc, d1, with_frozen=True, ao_repr=False):
 
     if ao_repr:
         mo = mycc.mo_coeff
-        dm1 = lib.einsum('pi, ij, qj -> pq', mo, dm1, mo.conj())
+        dm1 = einsum('pi, ij, qj -> pq', mo, dm1, mo.conj())
     return dm1
 
 def _make_rdm2(mycc, d1, d2, with_dm1=True, with_frozen=True, ao_repr=False):
