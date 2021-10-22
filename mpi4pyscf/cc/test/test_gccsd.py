@@ -158,9 +158,7 @@ rdm1_ref = mycc_ref.make_rdm1()
 
 print ("rdm1 diff")
 print (max_abs(rdm1 - rdm1_ref))
-
-
-exit()
+print (rdm1)
 
 #test_init_amps(mycc)
 #test_converged_ecc(mycc)

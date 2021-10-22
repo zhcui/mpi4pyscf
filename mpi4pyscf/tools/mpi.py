@@ -249,14 +249,17 @@ def allreduce(sendbuf, op=MPI.SUM):
                        [recv_seg[p0:p1], dtype], op)
     return recvbuf
 
-def scatter(sendbuf, root=0):
+def scatter(sendbuf, root=0, data=None):
     if rank == root:
         mpi_dtype = numpy.result_type(*sendbuf).char
         shape = comm.scatter([x.shape for x in sendbuf])
         counts = numpy.asarray([x.size for x in sendbuf])
         comm.bcast((mpi_dtype, counts))
-        sendbuf = [numpy.asarray(x, mpi_dtype).ravel() for x in sendbuf]
-        sendbuf = numpy.hstack(sendbuf)
+        if data is None:
+            sendbuf = [numpy.asarray(x, mpi_dtype).ravel() for x in sendbuf]
+            sendbuf = numpy.hstack(sendbuf)
+        else:
+            sendbuf = numpy.asarray(data, order='C')
     else:
         shape = comm.scatter(None)
         mpi_dtype, counts = comm.bcast(None)

@@ -60,7 +60,7 @@ def update_amps(mycc, t1, t2, eris):
     """
     Update GCCSD amplitudes.
     """
-    time1 = time0 = time.clock(), time.time()
+    time1 = time0 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(mycc.stdout, mycc.verbose)
     cpu1 = time0
 
@@ -381,7 +381,7 @@ def init_amps(mycc, eris=None):
         mycc.ao2mo()
         eris = mycc._eris
 
-    time0 = time.clock(), time.time()
+    time0 = logger.process_clock(), logger.perf_counter()
     mo_e = eris.mo_energy
     nocc = mycc.nocc
     nvir = mo_e.size - nocc
@@ -658,6 +658,10 @@ class GCCSD(gccsd.GCCSD):
     def ao2mo(self, mo_coeff=None):
         _make_eris_incore(self, mo_coeff)
         return 'Done'
+    
+    def ao2mo_ghf(self, mo_coeff=None):
+        _make_eris_incore_ghf(self, mo_coeff)
+        return 'Done'
 
     def ccsd(self, t1=None, t2=None, eris=None):
         assert self.mo_coeff is not None
@@ -785,6 +789,49 @@ class GCCSD(gccsd.GCCSD):
 
 CCSD = GCCSD
 
+def _init_ggccsd(ccsd_obj):
+    from pyscf import gto
+    from mpi4pyscf.tools import mpi
+    from mpi4pyscf.cc import gccsd
+    if mpi.rank == 0:
+        mpi.comm.bcast((ccsd_obj.mol.dumps(), ccsd_obj.pack()))
+    else:
+        ccsd_obj = gccsd.GGCCSD.__new__(gccsd.GGCCSD)
+        ccsd_obj.t1 = ccsd_obj.t2 = None
+        mol, cc_attr = mpi.comm.bcast(None)
+        ccsd_obj.mol = gto.mole.loads(mol)
+        ccsd_obj.unpack_(cc_attr)
+    if True:  # If also to initialize cc._scf object
+        if mpi.rank == 0:
+            if hasattr(ccsd_obj._scf, '_scf'):
+                # ZHC FIXME a hack, newton need special treatment to broadcast
+                ccsd_obj._scf = ccsd_obj._scf._scf
+            mpi.comm.bcast((ccsd_obj._scf.__class__, _pack_scf(ccsd_obj._scf)))
+        else:
+            mf_cls, mf_attr = mpi.comm.bcast(None)
+            ccsd_obj._scf = mf_cls(ccsd_obj.mol)
+            ccsd_obj._scf.__dict__.update(mf_attr)
+
+    key = id(ccsd_obj)
+    mpi._registry[key] = ccsd_obj
+    regs = mpi.comm.gather(key)
+    return regs
+
+
+class GGCCSD(GCCSD):
+    """
+    MPI GGCCSD.
+    """
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
+        assert isinstance(mf, scf.ghf.GHF)
+        gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
+        regs = mpi.pool.apply(_init_ggccsd, (self,), (None,))
+        self._reg_procs = regs
+
+    def ao2mo(self, mo_coeff=None):
+        _make_eris_incore_ghf(self, mo_coeff)
+        return 'Done'
+
 # ************************************************************************
 # ao2mo routines
 # ************************************************************************
@@ -794,7 +841,7 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     """
     Make physist eri with incore ao2mo.
     """
-    cput0 = (time.clock(), time.time())
+    cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.Logger(mycc.stdout, mycc.verbose)
     _sync_(mycc)
     eris = gccsd._PhysicistsERIs()
@@ -997,6 +1044,144 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
                 eris.xvoo[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, :nocc, :nocc]
                 eris.xvvv[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, nocc:, nocc:]
     cput1 = log.timer('CCSD ao2mo load:               ', *cput1)
+
+    f.close() 
+    comm.Barrier()
+    os.remove("gccsd_eri_tmp_%s.h5"%rank)
+    mycc._eris = eris
+    log.timer('CCSD integral transformation   ', *cput0)
+    return eris
+
+@mpi.parallel_call
+def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
+    """
+    Make physist eri with incore ao2mo, for GGHF.
+    """ 
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.Logger(mycc.stdout, mycc.verbose)
+    _sync_(mycc)
+    eris = gccsd._PhysicistsERIs()
+    
+    if rank == 0:
+        eris._common_init_(mycc, mo_coeff)
+        comm.bcast((eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy))
+    else:
+        eris.mol = mycc.mol
+        eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy = comm.bcast(None)
+    
+    nocc = eris.nocc
+    nao, nmo = eris.mo_coeff.shape
+    nvir = nmo - nocc
+    nmo_pair = nmo * (nmo + 1) // 2
+    vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
+    vloc0, vloc1 = vlocs[rank]
+    vseg = vloc1 - vloc0
+    cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
+
+    ## reference
+    #if rank == 0:
+    #    eri_ref = mycc._scf._eri
+    #    eri_ref = ao2mo.incore.full(eri_ref, eris.mo_coeff, compact=False)
+    #    eri_ref = eri_ref.reshape(nmo, nmo,
+    #            nmo, nmo)
+    #    eri_ref = eri_ref.transpose(0, 2, 1, 3) - eri_ref.transpose(0, 2, 3, 1)
+
+    # distribute ij, trans kl
+    plocs = [_task_location(nmo_pair, task_id) for task_id in range(mpi.pool.size)]
+    ploc0, ploc1 = plocs[rank]
+    pseg = ploc1 - ploc0
+    if rank == 0:
+        eri_data = eri_sliced = mycc._scf._eri
+        eri_sliced = [eri_sliced[p0:p1] for (p0, p1) in plocs]
+    else:
+        eri_data = None
+        eri_sliced = None
+     
+    eri_mo = mpi.scatter(eri_sliced, root=0, data=eri_data)
+    eri_sliced = None
+    eri_data = None
+    
+    mo = eris.mo_coeff
+    klmosym, nkl_pair, mokl, klshape = ao2mo.incore._conc_mos(mo, mo, compact=False)
+    eri_mo = _ao2mo.nr_e2(eri_mo, mokl, klshape, aosym='s4', mosym=klmosym)
+    
+    cput1 = log.timer('CCSD ao2mo nr_e2:              ', *cput1)
+
+    # distribute over k, trans ij
+    plocs = [_task_location(nmo, task_id) for task_id in range(mpi.pool.size)]
+    ploc0, ploc1 = plocs[rank]
+    pseg = ploc1 - ploc0
+    eri_mo = mpi.alltoall([eri_mo[:, p0*nmo:p1*nmo] for p0, p1 in plocs], split_recvbuf=True)
+    eri_mo = np.asarray(np.vstack(eri_mo).T, order='C')
+    
+    fname = "gccsd_eri_tmp_%s.h5"%rank
+    f = h5py.File(fname, 'w')
+    eri_phys = f.create_dataset('eri_phys', (pseg, nmo, nmo, nmo), 'f8', 
+                                chunks=(pseg, 1, nmo, nmo))
+    
+    unit = pseg * nmo * nmo * 2
+    mem_now = lib.current_memory()[0]
+    max_memory = max(0, mycc.max_memory - mem_now)
+    blksize = min(nmo, max(BLKMIN, int((max_memory*0.9e6/8)/unit)))
+    
+    blksize = 3
+    for p0, p1 in lib.prange(0, nmo, blksize):
+        ijmosym, nij_pair, moij, ijshape = ao2mo.incore._conc_mos(mo[:, p0:p1], mo, compact=False)
+        eri = _ao2mo.nr_e2(eri_mo, moij, ijshape, aosym='s4', mosym=ijmosym)
+        
+        eri = eri.reshape(pseg, nmo, p1-p0, nmo)
+        eri_phys[:, p0:p1] = eri.transpose(0, 2, 1, 3) - eri.transpose(0, 2, 3, 1)
+        eri = None
+
+    f.close()
+    comm.Barrier()
+    cput1 = log.timer('CCSD ao2mo nr_e1:              ', *cput1)
+
+    o_idx = -1
+    v_idx = mpi.pool.size
+    for r, (p0, p1) in enumerate(plocs):
+        if p0 <= nocc - 1 < p1:
+            o_idx = r
+        if p0 <= nocc < p1:
+            v_idx = r
+            break
+    o_files = np.arange(mpi.pool.size)[:(o_idx+1)]
+    v_files = np.arange(mpi.pool.size)[v_idx:]
+
+    eris.oooo = np.empty((nocc, nocc, nocc, nocc))
+    eris.ooox = np.empty((nocc, nocc, nocc, vseg))
+    eris.oxov = np.empty((nocc, vseg, nocc, nvir))
+    eris.oxvv = np.empty((nocc, vseg, nvir, nvir))
+    eris.ovvx = np.empty((nocc, nvir, nvir, vseg))
+    eris.xvoo = np.empty((vseg, nvir, nocc, nocc))
+    eris.xvvv = np.empty((vseg, nvir, nvir, nvir))
+    for r in range(mpi.pool.size):
+        f = lib.H5TmpFile(filename="gccsd_eri_tmp_%s.h5"%r, mode='r')
+        eri_phys = f["eri_phys"]
+        if r in o_files:
+            p0, p1 = plocs[r]
+            p1 = min(p1, nocc)
+            pseg = p1 - p0
+            if pseg > 0:
+                eris.oooo[p0:p1] = eri_phys[:pseg, :nocc, :nocc, :nocc]
+                eris.ooox[p0:p1] = eri_phys[:pseg, :nocc, :nocc, nocc+vloc0:nocc+vloc1]
+                eris.oxov[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, :nocc, nocc:]
+                eris.oxvv[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, nocc:, nocc:]
+                eris.ovvx[p0:p1] = eri_phys[:pseg, nocc:, nocc:, nocc+vloc0:nocc+vloc1]
+        
+        if r in v_files:
+            p00, p10 = plocs[r]
+            p0 = max(p00, nocc+vloc0)
+            p1 = min(p10, nocc+vloc1)
+            pseg = p1 - p0
+            if pseg > 0:
+                eris.xvoo[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, :nocc, :nocc]
+                eris.xvvv[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, nocc:, nocc:]
+    cput1 = log.timer('CCSD ao2mo load:               ', *cput1)
+    
+    ## check with reference
+    #if rank == 0:
+    #    print (la.norm(eris.oooo - eri_ref[:nocc, :nocc, :nocc, :nocc]))
 
     f.close() 
     comm.Barrier()

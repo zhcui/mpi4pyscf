@@ -43,7 +43,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     CCSD lambda kernel.
     """
     log = logger.new_logger(mycc, verbose)
-    cput1 = cput0 = (time.clock(), time.time())
+    cput1 = cput0 = (logger.process_clock(), logger.perf_counter())
     _sync_(mycc)
 
     eris = getattr(mycc, '_eris', None)
@@ -229,7 +229,7 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     """
     Update GCCSD lambda.
     """
-    time1 = time0 = time.clock(), time.time()
+    time1 = time0 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(mycc.stdout, mycc.verbose)
     cpu1 = time0
 
