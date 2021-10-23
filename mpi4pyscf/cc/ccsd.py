@@ -52,7 +52,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
     eold = 0
     eccsd = mycc.energy(t1, t2, eris)
     log.info('Init E(CCSD) = %.15g', eccsd)
-
+    
     if isinstance(mycc.diis, diis.DistributedDIIS):
         adiis = mycc.diis
     elif mycc.diis:
@@ -836,7 +836,9 @@ class CCSD(ccsd.CCSD):
                 '_nmo'      : self._nmo,
                 'diis_file' : self.diis_file,
                 'level_shift': self.level_shift,
-                'direct'    : self.direct}
+                'direct'    : self.direct,
+                'diis_space': self.diis_space}
+    
     def unpack_(self, ccdic):
         self.__dict__.update(ccdic)
         return self

@@ -631,7 +631,8 @@ class GCCSD(gccsd.GCCSD):
                 '_nmo'      : self._nmo,
                 'diis_file' : self.diis_file,
                 'level_shift': self.level_shift,
-                'direct'    : self.direct}
+                'direct'    : self.direct,
+                'diis_space': self.diis_space}
 
     def unpack_(self, ccdic):
         self.__dict__.update(ccdic)
@@ -923,97 +924,6 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
     o_files = np.arange(mpi.pool.size)[:(o_idx+1)]
     v_files = np.arange(mpi.pool.size)[v_idx:]
 
-# ZHC NOTE the following rotation is slightly faster
-# and use O(n) loading, but use more memory.
-#    f = lib.H5TmpFile(filename="gccsd_eri_tmp_%s.h5"%rank, mode='r')
-#    eri_phys = f["eri_phys"]
-#    
-#    # xvvv
-#    eris.xvvv = np.empty((vseg, nvir, nvir, nvir))
-#    if rank in v_files:
-#        tmp = eri_phys[max(ploc0, nocc)-ploc0:ploc1-ploc0, nocc:, nocc:, nocc:]
-#    else:
-#        tmp = np.zeros((0, nvir, nvir, nvir))
-#    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
-#        if eri_tmp.size > 0:
-#            p0 = max(nocc, p0)
-#            eris.xvvv[:, p0-nocc:p1-nocc] = -eri_tmp[:, vloc0:vloc1].transpose(1, 0, 2, 3)
-#        eri_tmp = None
-#    tmp = None
-#    cput1 = log.timer('CCSD ao2mo xvvv:               ', *cput1)
-#    
-#    # xvoo
-#    eris.xvoo = np.empty((vseg, nvir, nocc, nocc))
-#    if rank in v_files:
-#        tmp = eri_phys[max(ploc0, nocc)-ploc0:ploc1-ploc0, nocc:, :nocc, :nocc]
-#    else:
-#        tmp = np.zeros((0, nvir, nocc, nocc))
-#    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
-#        if eri_tmp.size > 0:
-#            p0 = max(nocc, p0)
-#            eris.xvoo[:, p0-nocc:p1-nocc] = -eri_tmp[:, vloc0:vloc1].transpose(1, 0, 2, 3)
-#        eri_tmp = None
-#    tmp = None
-#    cput1 = log.timer('CCSD ao2mo xvoo:               ', *cput1)
-#    
-#    # oooo
-#    eris.oooo = np.empty((nocc, nocc, nocc, nocc))
-#    if rank in o_files:
-#        tmp = eri_phys[:min(nocc, ploc1)-ploc0, :nocc, :nocc, :nocc]
-#    else:
-#        tmp = np.zeros((0, nocc, nocc, nocc))
-#    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
-#        if eri_tmp.size > 0:
-#            p1 = min(nocc, p1)
-#            eris.oooo[p0:p1] = eri_tmp
-#        eri_tmp = None
-#    tmp = None
-#    cput1 = log.timer('CCSD ao2mo oooo:               ', *cput1)
-#
-#    # ooox
-#    eris.ooox = np.empty((nocc, nocc, nocc, vseg))
-#    if rank in o_files:
-#        tmp = eri_phys[:min(nocc, ploc1)-ploc0, :nocc, :nocc, nocc:]
-#    else:
-#        tmp = np.zeros((0, nocc, nocc, nvir))
-#    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
-#        if eri_tmp.size > 0:
-#            p1 = min(nocc, p1)
-#            eris.ooox[p0:p1] = eri_tmp[:, :, :, vloc0:vloc1]
-#        eri_tmp = None
-#    tmp = None
-#    cput1 = log.timer('CCSD ao2mo ooox:               ', *cput1)
-#    
-#    # oxov
-#    eris.oxov = np.empty((nocc, vseg, nocc, nvir))
-#    if rank in o_files:
-#        tmp = eri_phys[:min(nocc, ploc1)-ploc0, nocc:, :nocc, nocc:]
-#    else:
-#        tmp = np.zeros((0, nvir, nocc, nvir))
-#    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
-#        if eri_tmp.size > 0:
-#            p1 = min(nocc, p1)
-#            eris.oxov[p0:p1] = eri_tmp[:, vloc0:vloc1]
-#        eri_tmp = None
-#    tmp = None
-#    cput1 = log.timer('CCSD ao2mo oxov:               ', *cput1)
-#    
-#    # oxvv and ovvx
-#    eris.oxvv = np.empty((nocc, vseg, nvir, nvir))
-#    eris.ovvx = np.empty((nocc, nvir, nvir, vseg))
-#    if rank in o_files:
-#        tmp = eri_phys[:min(nocc, ploc1)-ploc0, nocc:, nocc:, nocc:]
-#    else:
-#        tmp = np.zeros((0, nvir, nvir, nvir))
-#    for task_id, eri_tmp, p0, p1 in _rotate_vir_block(tmp, vlocs=plocs):
-#        if eri_tmp.size > 0:
-#            p1 = min(nocc, p1)
-#            eris.oxvv[p0:p1] = eri_tmp[:, vloc0:vloc1]
-#            eris.ovvx[p0:p1] = eri_tmp[:, :, :, vloc0:vloc1]
-#        eri_tmp = None
-#    tmp = None
-#    cput1 = log.timer('CCSD ao2mo oxvv / ovvx:        ', *cput1)
-    
     eris.oooo = np.empty((nocc, nocc, nocc, nocc))
     eris.ooox = np.empty((nocc, nocc, nocc, vseg))
     eris.oxov = np.empty((nocc, vseg, nocc, nvir))
@@ -1077,14 +987,6 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     vloc0, vloc1 = vlocs[rank]
     vseg = vloc1 - vloc0
     cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
-
-    ## reference
-    #if rank == 0:
-    #    eri_ref = mycc._scf._eri
-    #    eri_ref = ao2mo.incore.full(eri_ref, eris.mo_coeff, compact=False)
-    #    eri_ref = eri_ref.reshape(nmo, nmo,
-    #            nmo, nmo)
-    #    eri_ref = eri_ref.transpose(0, 2, 1, 3) - eri_ref.transpose(0, 2, 3, 1)
 
     # distribute ij, trans kl
     plocs = [_task_location(nmo_pair, task_id) for task_id in range(mpi.pool.size)]
@@ -1179,10 +1081,6 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
                 eris.xvvv[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, nocc:, nocc:]
     cput1 = log.timer('CCSD ao2mo load:               ', *cput1)
     
-    ## check with reference
-    #if rank == 0:
-    #    print (la.norm(eris.oooo - eri_ref[:nocc, :nocc, :nocc, :nocc]))
-
     f.close() 
     comm.Barrier()
     os.remove("gccsd_eri_tmp_%s.h5"%rank)
