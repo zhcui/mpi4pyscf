@@ -754,9 +754,9 @@ def gather_amplitudes(mycc, t1=None, t2=None):
     return t1, t2
 
 def _diff_norm(mycc, t1new, t2new, t1, t2):
-    norm2 = comm.allreduce(numpy.linalg.norm(t2new - t2))
-    norm1 = numpy.linalg.norm(t1new - t1)
-    return (norm1**2 + norm2**2)**.5
+    norm2 = comm.allreduce(numpy.linalg.norm(t2new - t2)**2)
+    norm1 = numpy.linalg.norm(t1new - t1)**2
+    return (norm1 + norm2)**.5
 
 @lib.with_doc(ccsd.restore_from_diis_.__doc__)
 @mpi.parallel_call
