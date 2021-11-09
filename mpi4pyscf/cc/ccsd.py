@@ -84,7 +84,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
     return conv, eccsd, t1, t2
 
 def update_amps(mycc, t1, t2, eris):
-    time1 = time0 = process_clock(), perf_counter()
+    time1 = time0 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(mycc.stdout, mycc.verbose)
     cpu1 = time0
 
@@ -351,7 +351,7 @@ def _add_vvvv_tril(mycc, t1T, t2T, eris, out=None, with_ovvv=None):
     Using symmetry t2[ijab] = t2[jiba] and Ht2[ijab] = Ht2[jiba], compute the
     lower triangular part of  Ht2
     '''
-    time0 = process_clock(), perf_counter()
+    time0 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(mycc.stdout, mycc.verbose)
     if with_ovvv is None:
         with_ovvv = mycc.direct
@@ -430,7 +430,7 @@ def _add_vvvv_full(mycc, t1T, t2T, eris, out=None, with_ovvv=False):
     '''Ht2 = numpy.einsum('ijcd,acdb->ijab', t2, vvvv)
     without using symmetry t2[ijab] = t2[jiba] in t2 or Ht2
     '''
-    time0 = process_clock(), perf_counter()
+    time0 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(mycc.stdout, mycc.verbose)
 
     nvir_seg, nvir, nocc = t2T.shape[:3]
@@ -537,7 +537,7 @@ def _contract_vvvv_t2(mycc, vvvv, t2T, task_locs, out=None, verbose=None):
         vvvv : None or integral object
             if vvvv is None, contract t2 to AO-integrals using AO-direct algorithm
     '''
-    time0 = process_clock(), perf_counter()
+    time0 = logger.process_clock(), logger.perf_counter()
     mol = mycc.mol
     log = logger.new_logger(mycc, verbose)
 
@@ -662,7 +662,7 @@ def init_amps(mycc, eris=None):
         mycc.ao2mo()
         eris = mycc._eris
 
-    time0 = process_clock(), perf_counter()
+    time0 = logger.process_clock(), logger.perf_counter()
     mo_e = eris.mo_energy
     nocc = mycc.nocc
     nvir = mo_e.size - nocc
@@ -954,7 +954,7 @@ def _make_eris_outcore(mycc, mo_coeff=None):
 #        vvv = lib.pack_tril(eri[:,:,nocc:,nocc:].reshape((p1-p0)*nocc,nvir,nvir))
 #        eris.ovvv[:,p0:p1] = vvv.reshape(p1-p0,nocc,nvpair).transpose(1,0,2)
 
-        cput2 = process_clock(), perf_counter()
+        cput2 = logger.process_clock(), logger.perf_counter()
         ovvv_segs = [eri[:,:,nocc+q0:nocc+q1,nocc:].transpose(2,3,0,1) for q0,q1 in vlocs]
         ovvv_segs = mpi.alltoall(ovvv_segs, split_recvbuf=True)
         cput2 = log.timer_debug1('vvvo alltoall', *cput2)
@@ -983,7 +983,7 @@ def _make_eris_outcore(mycc, mo_coeff=None):
         if p0 < p1:
             fload(fswap['0'], p0*nocc, p1*nocc, buf_prefetch)
 
-    cput1 = process_clock(), perf_counter()
+    cput1 = logger.process_clock(), logger.perf_counter()
     outbuf = numpy.empty((blksize*nocc,nmo**2))
     with lib.call_in_background(prefetch) as bprefetch:
         fload(fswap['0'], 0, min(nocc,blksize)*nocc, buf_prefetch)
