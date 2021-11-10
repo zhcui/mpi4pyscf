@@ -56,9 +56,15 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     if t2 is None:
         t2 = mycc.t2
     if l1 is None:
-        l1 = t1
+        if mycc.l1 is None:
+            l1 = t1
+        else:
+            l1 = mycc.l1
     if l2 is None:
-        l2 = t2
+        if mycc.l2 is None:
+            l2 = t2
+        else:
+            l2 = mycc.l2
     if fintermediates is None:
         fintermediates = make_intermediates
     if fupdate is None:

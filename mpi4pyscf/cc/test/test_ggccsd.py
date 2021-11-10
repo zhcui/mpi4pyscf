@@ -137,6 +137,16 @@ mycc.conv_tol_normt = 1e-6
 mycc.max_cycle = 50
 mycc.kernel()
 
+mycc.save_amps()
+
+
+mycc = mpicc.gccsd.GGCCSD(mf)
+mycc.conv_tol = 1e-8
+mycc.conv_tol_normt = 1e-6
+mycc.max_cycle = 50
+mycc.restore_from_h5(umat=np.eye(mycc.nmo))
+mycc.kernel()
+
 print ("E diff: ", abs(mycc.e_corr - -0.134698069373674))
 assert abs(mycc.e_corr - -0.134698069373674) < 1e-8
 mycc.solve_lambda()

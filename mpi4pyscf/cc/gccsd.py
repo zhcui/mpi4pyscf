@@ -25,6 +25,7 @@ Usage: mpirun -np 2 python gccsd.py
 
 import os
 import time
+from functools import reduce
 import h5py
 import numpy as np
 import scipy.linalg as la
@@ -603,11 +604,138 @@ def test_update_lambda(mycc, ref):
             print ("l2 diff: ", la.norm(l2new - ref[1]))
             #assert la.norm(l2new - ref[1]) < 1e-10
 
+@mpi.parallel_call
+def save_amps(mycc, fname="fcc"):
+    """
+    Save amplitudes to a file.
+    """
+    _sync_(mycc)
+    filename = fname + '__rank' + str(mpi.rank) + ".h5"
+    fcc = lib.H5TmpFile(filename, 'w')
+    fcc['mo_coeff'] = mycc.mo_coeff
+    if (getattr(mycc, "t1", None) is not None) and \
+       (getattr(mycc, "t2", None) is not None):
+        tvec = mycc.amplitudes_to_vector(mycc.t1, mycc.t2)
+        fcc['tvec'] = tvec
+    tvec = None
+    if (getattr(mycc, "l1", None) is not None) and \
+       (getattr(mycc, "l2", None) is not None):
+        lvec = mycc.amplitudes_to_vector(mycc.l1, mycc.l2)
+        fcc['lvec'] = lvec
+    lvec = None
+
+@mpi.parallel_call
+def load_amps(mycc, fname="fcc"):
+    """
+    Load amplitudes from a file.
+    """
+    _sync_(mycc)
+    filename = fname + '__rank' + str(mpi.rank) + ".h5"
+    fcc = h5py.File(filename, 'r')
+    keys = fcc.keys()
+    mo_coeff = np.asarray(fcc["mo_coeff"])
+    if 'tvec' in keys:
+        tvec = np.asarray(fcc["tvec"])
+        t1, t2 = mycc.vector_to_amplitudes(tvec)
+        tvec = None
+    else:
+        t1 = t2 = None
+
+    if 'lvec' in keys:
+        lvec = np.asarray(fcc["lvec"])
+        l1, l2 = mycc.vector_to_amplitudes(lvec)
+        lvec = None
+    else:
+        l1 = l2 = None
+    fcc.close()
+    return t1, t2, l1, l2, mo_coeff
+
+@mpi.parallel_call
+def restore_from_h5(mycc, fname="fcc", umat=None):
+    """
+    Restore t1, t2, l1, l2 from file.
+    
+    Args:
+        mycc: CC object.
+        fname: prefix for the filename.
+        umat: (nmo, nmo), rotation matrix to rotate amps.
+
+    Return:
+        mycc: CC object, with t1, t2, l1, l2 updated.
+    """
+    _sync_(mycc)
+    logger.info(mycc, "restore amps from h5 ...")
+    filename = fname + '__rank' + str(rank) + ".h5"
+    if all(comm.allgather(os.path.isfile(filename))):
+        t1, t2, l1, l2, mo_coeff = mycc.load_amps(fname=fname)
+        if umat is not None:
+            logger.info(mycc, "rotate amps ...")
+            nocc, nvir = t1.shape
+            ntasks = mpi.pool.size
+            vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+            
+            t1 = transform_t1_to_bo(t1, umat)
+            t2 = transform_t2_to_bo(t2, umat, vlocs=vlocs)
+            
+            if l1 is not None:
+                l1 = transform_l1_to_bo(l1, umat)
+            if l2 is not None:
+                l2 = transform_l2_to_bo(l2, umat, vlocs=vlocs)
+            
+        mycc.t1 = t1
+        mycc.t2 = t2
+        mycc.l1 = l1
+        mycc.l2 = l2
+    else:
+        raise ValueError("restore_from_h5 failed, (part of) files not exist.")
+    return mycc
+
+def transform_t1_to_bo(t1, u):
+    """
+    transform t1.
+    """
+    t1T = t1.T
+    nvir, nocc = t1T.shape
+    u_oo = u[:nocc, :nocc]
+    u_vv = u[nocc:, nocc:]
+    t1T = reduce(np.dot, (u_vv.conj().T, t1T, u_oo))
+    return t1T.T
+
+transform_l1_to_bo = transform_t1_to_bo
+
+def transform_t2_to_bo(t2, u, vlocs=None):
+    """
+    transform t2.
+    """
+    t2T = t2.transpose(2, 3, 0, 1)
+    nvir_seg, nvir, nocc = t2T.shape[:3]
+    if vlocs is None:
+        ntasks = mpi.pool.size
+        vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    vloc0, vloc1 = vlocs[rank]
+    assert vloc1 - vloc0 == nvir_seg
+    
+    u_oo = u[:nocc, :nocc]
+    u_vv = u[nocc:, nocc:] 
+            
+    t2Tnew = np.zeros_like(t2T)
+    for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
+        t2Tnew += np.einsum('aA, abij -> Abij', u_vv[p0:p1, vloc0:vloc1],
+                            t2T_tmp, optimize=True)
+        t2T_tmp = None
+    t2 = t2T = None
+
+    t2Tnew = np.einsum("Abij, bB, iI, jJ -> ABIJ", t2Tnew, u_vv,
+                       u_oo, u_oo, optimize=True)
+    t2 = t2Tnew.transpose(2, 3, 0, 1)
+    return t2
+
+transform_l2_to_bo = transform_t2_to_bo
+
 class GCCSD(gccsd.GCCSD):
     """
     MPI GCCSD.
     """
-
     conv_tol = getattr(__config__, 'cc_gccsd_GCCSD_conv_tol', 1e-7)
     conv_tol_normt = getattr(__config__, 'cc_gccsd_GCCSD_conv_tol_normt', 1e-6)
 
@@ -707,6 +835,13 @@ class GCCSD(gccsd.GCCSD):
         return vector_to_amplitudes(vec, nmo, nocc)
 
     restore_from_diis_ = restore_from_diis_
+    
+    restore_from_h5 = restore_from_h5
+    
+    save_amps = save_amps
+    
+    load_amps = load_amps
+    
 
     def vector_size(self, nmo=None, nocc=None):
         if nocc is None: nocc = self.nocc
