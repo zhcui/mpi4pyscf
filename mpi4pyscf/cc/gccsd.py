@@ -340,7 +340,7 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
         Wmbej -= 0.5 * einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
         t2T_tmp = None
 
-    Wmbej -= np.asarray(eris.oxov.transpose(2, 3, 1, 0))
+    Wmbej -= np.asarray(eris.oxov).transpose(2, 3, 1, 0)
     return Wmbej
 
 @mpi.parallel_call(skip_args=[3], skip_kwargs=['eris'])
@@ -798,6 +798,9 @@ class GCCSD(gccsd.GCCSD):
         if self.verbose >= logger.WARN:
             self.check_sanity()
         self.dump_flags()
+        
+        if self.e_hf is None:
+            self.e_hf = self._scf.e_tot
 
         self.converged, self.e_corr, self.t1, self.t2 = \
                 kernel(self, eris, t1, t2, max_cycle=self.max_cycle,

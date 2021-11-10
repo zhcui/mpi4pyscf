@@ -65,7 +65,7 @@ def update_amps(mycc, t1, t2, eris):
     log = logger.Logger(mycc.stdout, mycc.verbose)
     cpu1 = time0
 
-    #t1T = t1.T
+    t1T = t1.T
     t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
     nvir_seg, nvir, nocc = t2T.shape[:3]
     t2 = None
@@ -91,11 +91,12 @@ def update_amps(mycc, t1, t2, eris):
     Foo[np.diag_indices(nocc)] -= mo_e_o
 
     # T1 equation
-    t1Tnew  = np.dot(Fvv, t1T)
-    t1Tnew -= np.dot(t1T, Foo)
+    t1Tnew = np.zeros_like(t1T)
+    #t1Tnew  = np.dot(Fvv, t1T)
+    #t1Tnew -= np.dot(t1T, Foo)
 
     tmp  = np.einsum('aeim, me -> ai', t2T, Fov, optimize=True)
-    tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov, optimize=True)
+    #tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov, optimize=True)
     tmp  = mpi.allgather(tmp)
 
     tmp2  = einsum('eamn, mnie -> ai', t2T, eris.ooox)
@@ -105,11 +106,11 @@ def update_amps(mycc, t1, t2, eris):
     tmp  += tmp2
     tmp2  = None
 
-    t1Tnew += tmp
-    t1Tnew += fvo
+    #t1Tnew += tmp
+    #t1Tnew += fvo
 
     # T2 equation
-    Ftmp = Fvv - 0.5 * np.dot(t1T, Fov)
+    Ftmp = Fvv #- 0.5 * np.dot(t1T, Fov)
     t2Tnew = einsum('aeij, be -> abij', t2T, Ftmp)
     t2T_tmp = mpi.alltoall([t2Tnew[:, p0:p1] for p0, p1 in vlocs],
                            split_recvbuf=True)
@@ -119,7 +120,7 @@ def update_amps(mycc, t1, t2, eris):
         tmp = None
     t2T_tmp = None
 
-    Ftmp = Foo + 0.5 * np.dot(Fov, t1T)
+    Ftmp = Foo #+ 0.5 * np.dot(Fov, t1T)
     tmp = einsum('abim, mj -> abij', t2T, Ftmp)
     t2Tnew -= tmp
     t2Tnew += tmp.transpose(0, 1, 3, 2)
@@ -138,9 +139,10 @@ def update_amps(mycc, t1, t2, eris):
     Wvvvv = None
     tauT = None
 
-    tmp = einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
-    tmp = mpi.allgather(tmp) # bmij
-    tmp = einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
+    #tmp = einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
+    #tmp = mpi.allgather(tmp) # bmij
+    #tmp = einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
+    tmp = 0.0
 
     Wvovo = cc_Wovvo(t1T, t2T, eris, vlocs=vlocs).transpose(2, 0, 1, 3)
     for task_id, w_tmp, p0, p1 in _rotate_vir_block(Wvovo, vlocs=vlocs):
@@ -158,22 +160,22 @@ def update_amps(mycc, t1, t2, eris):
         tmp = None
     tmpT = None
 
-    tmp = einsum('ei, jeba -> abij', t1T, eris.ovvx)
-    t2Tnew += tmp
-    t2Tnew -= tmp.transpose(0, 1, 3, 2)
+    #tmp = einsum('ei, jeba -> abij', t1T, eris.ovvx)
+    #t2Tnew += tmp
+    #t2Tnew -= tmp.transpose(0, 1, 3, 2)
 
-    tmp = einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
-    t2Tnew += tmp
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
-    for task_id, (p0, p1) in enumerate(vlocs):
-        tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
-        t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
-        tmp = None
-    tmpT = None
+    #tmp = einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
+    #t2Tnew += tmp
+    #tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
+    #                    split_recvbuf=True)
+    #for task_id, (p0, p1) in enumerate(vlocs):
+    #    tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
+    #    t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
+    #    tmp = None
+    #tmpT = None
 
     eia = mo_e_o[:, None] - mo_e_v
-    t1Tnew /= eia.T
+    #t1Tnew /= eia.T
     for i in range(vloc0, vloc1):
         t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
 
@@ -192,34 +194,22 @@ def make_tauT(t1T, t2T, fac=1, vlocs=None):
     Returns:
         tauT: [a]bij, a is segmented.
     """
-    nvir_seg, nvir, nocc, _ = t2T.shape
-    if vlocs is None:
-        ntasks = mpi.pool.size
-        vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
-    vloc0, vloc1 = vlocs[rank]
-    tauT = np.einsum('ai, bj -> abij', t1T[vloc0:vloc1] * (fac * 0.5), t1T, optimize=True)
-    tauT = tauT - tauT.transpose(0, 1, 3, 2)
-    ##:tauT = tauT - tauT.transpose(1, 0, 2, 3)
-    tauT_tmp = mpi.alltoall([tauT[:, p0:p1] for p0, p1 in vlocs], split_recvbuf=True)
-    for task_id, (p0, p1) in enumerate(vlocs):
-        tmp = tauT_tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
-        tauT[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
-    tauT += t2T
-    return tauT
+    return t2T
 
 def cc_Fov(t1T, eris, vlocs=None):
     """
     Fov: me.
     """
     nvir, nocc = t1T.shape
-    if vlocs is None:
-        ntasks = mpi.pool.size
-        vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    #if vlocs is None:
+    #    ntasks = mpi.pool.size
+    #    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     fov  = eris.fock[:nocc, nocc:]
-    Fme  = np.einsum('efmn, fn -> em', eris.xvoo, t1T, optimize=True)
-    Fme  = mpi.allgather(Fme).T
-    Fme += fov
-    return Fme
+    #Fme  = np.einsum('efmn, fn -> em', eris.xvoo, t1T, optimize=True)
+    #Fme  = mpi.allgather(Fme).T
+    #Fme += fov
+    #return Fme
+    return fov
 
 def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     """
@@ -233,15 +223,15 @@ def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
         tauT_tilde = make_tauT(t1T, t2T, fac=0.5, vlocs=vlocs)
     vloc0, vloc1 = vlocs[rank]
 
-    fvo = eris.fock[nocc:, :nocc]
+    #fvo = eris.fock[nocc:, :nocc]
     fvv = eris.fock[nocc+vloc0:nocc+vloc1, nocc:]
-    Fea = fvv - 0.5 * np.dot(fvo[vloc0:vloc1], t1T.T)
+    Fea = fvv #- 0.5 * np.dot(fvo[vloc0:vloc1], t1T.T)
 
     Fae = (-0.5) * einsum('femn, famn -> ae', eris.xvoo, tauT_tilde)
     Fae = mpi.allreduce(Fae)
     tauT_tilde = None
     
-    Fea += np.einsum('mafe, fm -> ea', eris.ovvx, t1T, optimize=True)
+    #Fea += np.einsum('mafe, fm -> ea', eris.ovvx, t1T, optimize=True)
     Fae += mpi.allgather(Fea).T
     return Fae
 
@@ -256,14 +246,14 @@ def cc_Foo(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     
     Fmi  = 0.5 * einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
     tauT_tilde = None
-    Fmi += np.einsum('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1], optimize=True)
+    #Fmi += np.einsum('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1], optimize=True)
     Fmi  = mpi.allreduce(Fmi)
 
     fov = eris.fock[:nocc, nocc:]
     foo = eris.fock[:nocc, :nocc]
 
     Fmi += foo
-    Fmi += 0.5 * np.dot(fov, t1T)
+    #Fmi += 0.5 * np.dot(fov, t1T)
     return Fmi
 
 def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
@@ -277,10 +267,10 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
 
     Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
     tauT = None
-    tmp = einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
-    Wmnij += tmp
-    Wmnij -= tmp.transpose(0, 1, 3, 2)
-    tmp = None
+    #tmp = einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
+    #Wmnij += tmp
+    #Wmnij -= tmp.transpose(0, 1, 3, 2)
+    #tmp = None
     Wmnij  = mpi.allreduce(Wmnij)
     Wmnij += eris.oooo
     return Wmnij
@@ -309,15 +299,15 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None):
     tauT = None
 
     Wabef += np.asarray(eris.xvvv)
-    tmp = einsum('bm, mafe -> abfe', t1T, eris.oxvv)
-    Wabef += tmp
+    #tmp = einsum('bm, mafe -> abfe', t1T, eris.oxvv)
+    #Wabef += tmp
 
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
-    for task_id, (p0, p1) in enumerate(vlocs):
-        tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nvir, nvir)
-        Wabef[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
-        tmp = None
+    #tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
+    #                    split_recvbuf=True)
+    #for task_id, (p0, p1) in enumerate(vlocs):
+    #    tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nvir, nvir)
+    #    Wabef[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
+    #    tmp = None
 
     return Wabef
 
@@ -330,17 +320,20 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
 
-    Wmbej = einsum('efmn, fj -> mnej', eris.xvoo, -t1T)
-    Wmbej = einsum('mnej, bn -> mbej', Wmbej, t1T)
+    #Wmbej = einsum('efmn, fj -> mnej', eris.xvoo, -t1T)
+    #Wmbej = einsum('mnej, bn -> mbej', Wmbej, t1T)
     
-    Wmbej -= einsum('mbfe, fj -> mbej', eris.ovvx, t1T)
-    Wmbej += einsum('bn, mnje -> mbej', t1T, eris.ooox)
+    #Wmbej -= einsum('mbfe, fj -> mbej', eris.ovvx, t1T)
+    #Wmbej += einsum('bn, mnje -> mbej', t1T, eris.ooox)
+    
+    Wmbej = 0.0
 
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        Wmbej -= 0.5 * einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
+        Wmbej -= einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
         t2T_tmp = None
+    Wmbej *= 0.5
 
-    Wmbej -= np.asarray(eris.oxov.transpose(2, 3, 1, 0))
+    Wmbej -= np.asarray(eris.oxov).transpose(2, 3, 1, 0)
     return Wmbej
 
 @mpi.parallel_call(skip_args=[3], skip_kwargs=['eris'])
@@ -358,17 +351,18 @@ def energy(mycc, t1=None, t2=None, eris=None):
     nocc, nvir = t1.shape
     fock = eris.fock
     loc0, loc1 = _task_location(nvir)
-    if rank == 0:
-        e = np.einsum('ia, ia', fock[:nocc, nocc:], t1, optimize=True)
-    else:
-        e = 0.0
+    #if rank == 0:
+    #    e = np.einsum('ia, ia', fock[:nocc, nocc:], t1, optimize=True)
+    #else:
+    #    e = 0.0
+    e = 0.0
     max_memory = mycc.max_memory - lib.current_memory()[0]
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
         eris_vvoo = eris.xvoo[p0:p1]
         e += 0.25 * np.einsum('ijab, abij', t2[:, :, p0:p1], eris_vvoo, optimize=True)
-        e += 0.50 * np.einsum('ia, jb, abij', t1[:, loc0+p0:loc0+p1], t1,
-                              eris_vvoo, optimize=True)
+        #e += 0.50 * np.einsum('ia, jb, abij', t1[:, loc0+p0:loc0+p1], t1,
+        #                      eris_vvoo, optimize=True)
     e = comm.allreduce(e)
 
     if rank == 0 and abs(e.imag) > 1e-4:
@@ -387,7 +381,8 @@ def init_amps(mycc, eris=None):
     nocc = mycc.nocc
     nvir = mo_e.size - nocc
     eia = mo_e[:nocc, None] - mo_e[None, nocc:]
-    t1T = eris.fock[nocc:, :nocc] / eia.T
+    #t1T = eris.fock[nocc:, :nocc] / eia.T
+    t1T = np.zeros_like(eris.fock[nocc:, :nocc])
     loc0, loc1 = _task_location(nvir)
 
     t2T = np.empty((loc1-loc0, nvir, nocc, nocc))
@@ -448,7 +443,7 @@ class GCCD(mpigccsd.GCCSD):
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         regs = mpi.pool.apply(_init_gccd, (self,), (None,))
         self._reg_procs = regs
-
+        
     # ************************************************************************
     # core functions
     # ************************************************************************
@@ -463,6 +458,12 @@ class GCCD(mpigccsd.GCCSD):
         if self.verbose >= logger.WARN:
             self.check_sanity()
         self.dump_flags()
+        
+        if self.e_hf is None:
+            self.e_hf = self._scf.e_tot
+        
+        if t1 is not None:
+            t1 = np.zeros_like(t1)
 
         self.converged, self.e_corr, self.t1, self.t2 = \
                 kernel(self, eris, t1, t2, max_cycle=self.max_cycle,
@@ -481,6 +482,12 @@ class GCCD(mpigccsd.GCCSD):
 
     def solve_lambda(self, t1=None, t2=None, l1=None, l2=None,
                      eris=None):
+        
+        if t1 is not None:
+            t1 = np.zeros_like(t1)
+        if l1 is not None:
+            l1 = np.zeros_like(l1)
+
         self.converged_lambda, self.l1, self.l2 = \
                 mpigccd_lambda.kernel(self, eris, t1, t2, l1, l2,
                                       max_cycle=self.max_cycle,
@@ -490,6 +497,10 @@ class GCCD(mpigccsd.GCCSD):
 
     def make_rdm1(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
         '''Un-relaxed 1-particle density matrix in MO space'''
+        if t1 is not None:
+            t1 = np.zeros_like(t1)
+        if l1 is not None:
+            l1 = np.zeros_like(l1)
         return mpigccd_rdm.make_rdm1(self, t1, t2, l1, l2, ao_repr=ao_repr)
 
     def make_rdm2(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
@@ -498,6 +509,10 @@ class GCCD(mpigccsd.GCCSD):
 
         dm2[p,r,q,s] = <p^+ q^+ s r>
         '''
+        if t1 is not None:
+            t1 = np.zeros_like(t1)
+        if l1 is not None:
+            l1 = np.zeros_like(l1)
         return mpigccd_rdm.make_rdm2(self, t1, t2, l1, l2, ao_repr=ao_repr)
     
 CCD = GCCD
@@ -524,7 +539,7 @@ def _init_ggccd(ccd_obj):
             mf_cls, mf_attr = mpi.comm.bcast(None)
             ccd_obj._scf = mf_cls(ccd_obj.mol)
             ccd_obj._scf.__dict__.update(mf_attr)
-
+    
     key = id(ccd_obj)
     mpi._registry[key] = ccd_obj
     regs = mpi.comm.gather(key)
