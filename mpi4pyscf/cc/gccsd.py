@@ -397,10 +397,10 @@ def init_amps(mycc, eris=None):
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
         eris_vvoo = eris.xvoo[p0:p1]
         t2T[p0:p1] = (eris_vvoo / lib.direct_sum('ia, jb -> abij', eia[:, loc0+p0:loc0+p1], eia))
-        emp2 += 0.25 * np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj(), optimize=True).real
+        emp2 += np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj(), optimize=True).real
         eris_vvoo = None
 
-    mycc.emp2 = comm.allreduce(emp2)
+    mycc.emp2 = comm.allreduce(emp2) * 0.25
     logger.info(mycc, 'Init t2, MP2 energy = %.15g', mycc.emp2)
     logger.timer(mycc, 'init mp2', *time0)
     mycc.t1 = t1T.T
@@ -423,7 +423,9 @@ def _init_ccsd(ccsd_obj):
         if mpi.rank == 0:
             if hasattr(ccsd_obj._scf, '_scf'):
                 # ZHC FIXME a hack, newton need special treatment to broadcast
+                e_tot = ccsd_obj._scf.e_tot
                 ccsd_obj._scf = ccsd_obj._scf._scf
+                ccsd_obj._scf.e_tot = e_tot
             mpi.comm.bcast((ccsd_obj._scf.__class__, _pack_scf(ccsd_obj._scf)))
         else:
             mf_cls, mf_attr = mpi.comm.bcast(None)
@@ -944,7 +946,9 @@ def _init_ggccsd(ccsd_obj):
         if mpi.rank == 0:
             if hasattr(ccsd_obj._scf, '_scf'):
                 # ZHC FIXME a hack, newton need special treatment to broadcast
+                e_tot = ccsd_obj._scf.e_tot
                 ccsd_obj._scf = ccsd_obj._scf._scf
+                ccsd_obj._scf.e_tot = e_tot
             mpi.comm.bcast((ccsd_obj._scf.__class__, _pack_scf(ccsd_obj._scf)))
         else:
             mf_cls, mf_attr = mpi.comm.bcast(None)

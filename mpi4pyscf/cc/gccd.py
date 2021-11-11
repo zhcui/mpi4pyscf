@@ -360,10 +360,10 @@ def energy(mycc, t1=None, t2=None, eris=None):
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
         eris_vvoo = eris.xvoo[p0:p1]
-        e += 0.25 * np.einsum('ijab, abij', t2[:, :, p0:p1], eris_vvoo, optimize=True)
+        e += np.einsum('ijab, abij', t2[:, :, p0:p1], eris_vvoo, optimize=True)
         #e += 0.50 * np.einsum('ia, jb, abij', t1[:, loc0+p0:loc0+p1], t1,
         #                      eris_vvoo, optimize=True)
-    e = comm.allreduce(e)
+    e = comm.allreduce(e) * 0.25
 
     if rank == 0 and abs(e.imag) > 1e-4:
         logger.warn(mycc, 'Non-zero imaginary part found in CCD energy %s', e)
@@ -392,10 +392,10 @@ def init_amps(mycc, eris=None):
     for p0, p1 in lib.prange(0, loc1-loc0, blksize):
         eris_vvoo = eris.xvoo[p0:p1]
         t2T[p0:p1] = (eris_vvoo / lib.direct_sum('ia, jb -> abij', eia[:, loc0+p0:loc0+p1], eia))
-        emp2 += 0.25 * np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj(), optimize=True).real
+        emp2 += np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj(), optimize=True).real
         eris_vvoo = None
 
-    mycc.emp2 = comm.allreduce(emp2)
+    mycc.emp2 = comm.allreduce(emp2) * 0.25
     logger.info(mycc, 'Init t2, MP2 energy = %.15g', mycc.emp2)
     logger.timer(mycc, 'init mp2', *time0)
     mycc.t1 = t1T.T
@@ -418,7 +418,9 @@ def _init_gccd(ccd_obj):
         if mpi.rank == 0:
             if hasattr(ccd_obj._scf, '_scf'):
                 # ZHC FIXME a hack, newton need special treatment to broadcast
+                e_tot = ccd_obj._scf.e_tot
                 ccd_obj._scf = ccd_obj._scf._scf
+                ccd_obj._scf.e_tot = e_tot
             mpi.comm.bcast((ccd_obj._scf.__class__, _pack_scf(ccd_obj._scf)))
         else:
             mf_cls, mf_attr = mpi.comm.bcast(None)
@@ -533,7 +535,9 @@ def _init_ggccd(ccd_obj):
         if mpi.rank == 0:
             if hasattr(ccd_obj._scf, '_scf'):
                 # ZHC FIXME a hack, newton need special treatment to broadcast
+                e_tot = ccd_obj._scf.e_tot
                 ccd_obj._scf = ccd_obj._scf._scf
+                ccd_obj._scf.e_tot = e_tot
             mpi.comm.bcast((ccd_obj._scf.__class__, _pack_scf(ccd_obj._scf)))
         else:
             mf_cls, mf_attr = mpi.comm.bcast(None)
