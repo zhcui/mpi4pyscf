@@ -410,7 +410,7 @@ def _init_gccd(ccd_obj):
         mpi.comm.bcast((ccd_obj.mol.dumps(), ccd_obj.pack()))
     else:
         ccd_obj = gccd.GCCD.__new__(gccd.GCCD)
-        ccd_obj.t1 = ccd_obj.t2 = None
+        ccd_obj.t1 = ccd_obj.t2 = ccd_obj.l1 = ccd_obj.l2 = None
         mol, cc_attr = mpi.comm.bcast(None)
         ccd_obj.mol = gto.mole.loads(mol)
         ccd_obj.unpack_(cc_attr)
@@ -527,7 +527,7 @@ def _init_ggccd(ccd_obj):
         mpi.comm.bcast((ccd_obj.mol.dumps(), ccd_obj.pack()))
     else:
         ccd_obj = gccd.GGCCD.__new__(gccd.GGCCD)
-        ccd_obj.t1 = ccd_obj.t2 = None
+        ccd_obj.t1 = ccd_obj.t2 = ccd_obj.l1 = ccd_obj.l2 = None
         mol, cc_attr = mpi.comm.bcast(None)
         ccd_obj.mol = gto.mole.loads(mol)
         ccd_obj.unpack_(cc_attr)

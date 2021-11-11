@@ -138,6 +138,7 @@ mycc.conv_tol = 1e-8
 mycc.conv_tol_normt = 1e-6
 mycc.max_cycle = 50
 mycc.kernel()
+rdm1_ref = mycc.make_rdm1(ao_repr=True)
 
 E_ref = mycc.e_corr
 
@@ -152,21 +153,20 @@ E = mycc.e_corr
 print ("E diff to ref: ", abs(E - E_ref))
 assert abs(E - E_ref) < 1e-7
 
-exit()
+#mycc.save_amps()
+#
+#mycc = mpicc.gccd.GGCCD(mf)
+#mycc.conv_tol = 1e-8
+#mycc.conv_tol_normt = 1e-6
+#mycc.max_cycle = 50
+#mycc.restore_from_h5(umat=np.eye(mycc.nmo))
+#mycc.kernel()
 
-mycc.save_amps()
-
-mycc = mpicc.gccd.GGCCD(mf)
-mycc.conv_tol = 1e-8
-mycc.conv_tol_normt = 1e-6
-mycc.max_cycle = 50
-mycc.restore_from_h5(umat=np.eye(mycc.nmo))
-mycc.kernel()
-
-print ("E diff: ", abs(mycc.e_corr - -0.134698069373674))
-assert abs(mycc.e_corr - -0.134698069373674) < 1e-8
 mycc.solve_lambda()
-rdm1 = mycc.make_rdm1()
+rdm1 = mycc.make_rdm1(ao_repr=True)
 
 print ("rdm1")
 print (rdm1)
+
+print ("rdm1 diff to ref: ", max_abs(rdm1 - rdm1_ref))
+assert max_abs(rdm1 - rdm1_ref) < 1e-7

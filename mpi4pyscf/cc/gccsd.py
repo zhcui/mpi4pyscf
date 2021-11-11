@@ -415,7 +415,7 @@ def _init_ccsd(ccsd_obj):
         mpi.comm.bcast((ccsd_obj.mol.dumps(), ccsd_obj.pack()))
     else:
         ccsd_obj = gccsd.GCCSD.__new__(gccsd.GCCSD)
-        ccsd_obj.t1 = ccsd_obj.t2 = None
+        ccsd_obj.t1 = ccsd_obj.t2 = ccsd_obj.l1 = ccsd_obj.l2 = None
         mol, cc_attr = mpi.comm.bcast(None)
         ccsd_obj.mol = gto.mole.loads(mol)
         ccsd_obj.unpack_(cc_attr)
@@ -938,7 +938,7 @@ def _init_ggccsd(ccsd_obj):
         mpi.comm.bcast((ccsd_obj.mol.dumps(), ccsd_obj.pack()))
     else:
         ccsd_obj = gccsd.GGCCSD.__new__(gccsd.GGCCSD)
-        ccsd_obj.t1 = ccsd_obj.t2 = None
+        ccsd_obj.t1 = ccsd_obj.t2 = ccsd_obj.l1 = ccsd_obj.l2 = None
         mol, cc_attr = mpi.comm.bcast(None)
         ccsd_obj.mol = gto.mole.loads(mol)
         ccsd_obj.unpack_(cc_attr)

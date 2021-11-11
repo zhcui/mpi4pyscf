@@ -145,7 +145,7 @@ def make_intermediates(mycc, t1, t2, eris):
     tmp -= einsum('bcik, bcjk -> ij', eris.xvoo, tauT) * 0.5
     v2  -= mpi.allreduce(tmp)
     
-    v4 -= np.asarray(eris.oxov.transpose(0, 1, 3, 2))
+    v4 -= np.asarray(eris.oxov).transpose(0, 1, 3, 2)
     
     v5  = fvo + mpi.allgather(einsum('kc, bcjk -> bj', fov, t2T))
     tmp = fvo[vloc0:vloc1] + einsum('cdkl, dl -> ck', eris.xvoo, t1T)

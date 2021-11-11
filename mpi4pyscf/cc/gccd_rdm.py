@@ -40,22 +40,25 @@ def _gamma1_intermediates(mycc, t1, t2, l1, l2):
     l2T = l2.transpose(2, 3, 0, 1)
     t1 = t2 = l1 = l2 = None
 
-    doo  = -np.dot(l1T.T, t1T)
-    doo -= mpi.allreduce(einsum('efim, efjm -> ij', l2T, t2T) * 0.5)
+    #doo  = -np.dot(l1T.T, t1T)
+    doo = -mpi.allreduce(einsum('efim, efjm -> ij', l2T, t2T) * 0.5)
 
-    dvv  = np.dot(t1T, l1T.T)
-    dvv += mpi.allreduce(einsum('eamn, ebmn -> ab', t2T, l2T) * 0.5)
+    #dvv  = np.dot(t1T, l1T.T)
+    dvv = mpi.allreduce(einsum('eamn, ebmn -> ab', t2T, l2T) * 0.5)
 
-    xt1  = mpi.allreduce(einsum('efmn, efin -> mi', l2T, t2T) * 0.5)
-    xt2  = mpi.allreduce(einsum('famn, femn -> ae', t2T, l2T) * 0.5)
-    xt2 += np.dot(t1T, l1T.T)
+    #xt1  = mpi.allreduce(einsum('efmn, efin -> mi', l2T, t2T) * 0.5)
+    #xt2  = mpi.allreduce(einsum('famn, femn -> ae', t2T, l2T) * 0.5)
+    #xt2 += np.dot(t1T, l1T.T)
 
-    dvo  = mpi.allgather(np.einsum('aeim, em -> ai', t2T, l1T, optimize=True))
-    dvo -= np.dot(t1T, xt1)
-    dvo -= np.dot(xt2, t1T)
-    dvo += t1T
+    #dvo  = mpi.allgather(np.einsum('aeim, em -> ai', t2T, l1T, optimize=True))
+    #dvo -= np.dot(t1T, xt1)
+    #dvo -= np.dot(xt2, t1T)
+    #dvo += t1T
 
-    dov = l1T.T
+    #dov = l1T.T
+    nvir, nocc = t1T.shape
+    dvo = np.zeros((nvir, nocc), dtype=t1T.dtype)
+    dov = np.zeros((nocc, nvir), dtype=t1T.dtype)
     return doo, dov, dvo, dvv
 
 # gamma2 intermediates in Chemist's notation
