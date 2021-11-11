@@ -720,7 +720,7 @@ def transform_t2_to_bo(t2, u, vlocs=None):
     u_oo = u[:nocc, :nocc]
     u_vv = u[nocc:, nocc:] 
             
-    t2Tnew = np.zeros_like(t2T)
+    t2Tnew = 0.0
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
         t2Tnew += np.einsum('aA, abij -> Abij', u_vv[p0:p1, vloc0:vloc1],
                             t2T_tmp, optimize=True)

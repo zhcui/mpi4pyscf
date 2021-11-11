@@ -130,8 +130,9 @@ def make_intermediates(mycc, t1, t2, eris):
 
     v1  = fvv - np.dot(t1T, fov)
     tmp = einsum('jbac, cj -> ba', eris.oxvv, t1T)
-    v4 = np.zeros((nocc, nvir_seg, nvir, nocc))
-    
+    #v4 = np.zeros((nocc, nvir_seg, nvir, nocc))
+    v4 = 0.0
+
     eris_voov = eris.xvoo.transpose(0, 2, 3, 1)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_voov, vlocs=vlocs):
         tmp -= einsum('cjka, bcjk -> ba', eri_tmp, tauT[:, p0:p1]) * 0.5
@@ -152,7 +153,8 @@ def make_intermediates(mycc, t1, t2, eris):
     v5 += mpi.allreduce(np.einsum('ck, bk, cj -> bj', tmp, t1T, t1T[vloc0:vloc1], optimize=True))
      
     v5 += mpi.allreduce(einsum('kljc, cbkl -> bj', eris.ooox, t2T)) * 0.5
-    tmp = np.zeros((nvir_seg, nocc))
+    #tmp = np.zeros((nvir_seg, nocc))
+    tmp = 0.0
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
         tmp += einsum('kbcd, cdjk -> bj', eris.oxvv[:, :, p0:p1], t2T_tmp)
         t2T_tmp = None
@@ -189,7 +191,8 @@ def make_intermediates(mycc, t1, t2, eris):
     imds.wovvo[:] = wovvo
     wovvo = None
 
-    wovoo = np.zeros((nocc, nvir_seg, nocc, nocc))
+    #wovoo = np.zeros((nocc, nvir_seg, nocc, nocc))
+    wovoo = 0.0
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
         wovoo += einsum('icdb, dbjk -> icjk', eris.oxvv[:, :, p0:p1], tauT_tmp)
         tauT_tmp = None
