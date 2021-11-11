@@ -299,7 +299,7 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     l2Tnew = m3
     
     l2Tnew += vvoo
-    fvo1 = fvo #+ mpi.allreduce(einsum('cbkj, ck -> bj', vvoo, t1T[vloc0:vloc1]))
+    #fvo1 = fvo #+ mpi.allreduce(einsum('cbkj, ck -> bj', vvoo, t1T[vloc0:vloc1]))
     
     #tmp  = np.einsum('ai, bj -> abij', l1T[vloc0:vloc1], fvo1, optimize=True)
     tmp = 0.0
@@ -335,6 +335,7 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     tmp = einsum('abki, jk -> abij', l2T, v2)
     tmp1oo = mij #+ np.dot(l1T.T, t1T) # ik
     tmp -= einsum('ik, abkj -> abij', tmp1oo, vvoo)
+    vvoo = None
     l2Tnew += tmp
     l2Tnew -= tmp.transpose(0, 1, 3, 2)
     tmp = None
