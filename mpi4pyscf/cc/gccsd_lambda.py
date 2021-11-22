@@ -17,7 +17,6 @@
 #         Qiming Sun <osirpt.sun@gmail.com>
 #
 
-import time
 import numpy as np
 from pyscf import lib
 from pyscf.cc import ccsd_lambda

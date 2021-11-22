@@ -14,7 +14,6 @@
 # limitations under the License.
 #
 # Author: Zhi-Hao Cui <zhcui0408@gmail.com>
-#         Qiming Sun <osirpt.sun@gmail.com>
 #
 
 """
@@ -23,27 +22,18 @@ MPI-GCCD with real intergals.
 Usage: mpirun -np 2 python gccd.py
 """
 
-import os
-import time
-from functools import reduce
-import h5py
 import numpy as np
 import scipy.linalg as la
 
 from pyscf import lib
-from pyscf import ao2mo
-from pyscf.ao2mo import _ao2mo
 from pyscf import scf
 from pyscf.cc import gccsd
 from pyscf import __config__
 
 from mpi4pyscf.lib import logger
 from mpi4pyscf.tools import mpi
-from mpi4pyscf.cc.ccsd import (kernel, _task_location, _sync_,
-                               _pack_scf, _diff_norm, _rotate_vir_block,
-                               amplitudes_to_vector, vector_to_amplitudes,
-                               distribute_amplitudes_, gather_amplitudes,
-                               restore_from_diis_)
+from mpi4pyscf.cc.ccsd import (kernel, _task_location, _pack_scf,
+                               _rotate_vir_block)
 
 from mpi4pyscf.cc import gccsd as mpigccsd
 from mpi4pyscf.cc import gccd_lambda as mpigccd_lambda
@@ -54,8 +44,8 @@ rank = mpi.rank
 
 einsum = lib.einsum
 
-BLKMIN = getattr(__config__, 'cc_ccd_blkmin', 4)
-MEMORYMIN = getattr(__config__, 'cc_ccd_memorymin', 2000)
+BLKMIN = getattr(__config__, 'cc_gccd_blkmin', 4)
+MEMORYMIN = getattr(__config__, 'cc_gccd_memorymin', 2000)
 
 def update_amps(mycc, t1, t2, eris):
     """

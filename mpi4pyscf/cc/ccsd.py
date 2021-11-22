@@ -753,6 +753,17 @@ def gather_amplitudes(mycc, t1=None, t2=None):
     t2 = mpi.gather(t2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
     return t1, t2
 
+@mpi.parallel_call
+def gather_lambda(mycc, l1=None, l2=None):
+    '''Reconstruct the l1, l2 amplitudes from the distributed l2 tensors
+    '''
+    if l1 is None:
+        l1 = mycc.l1
+    if l2 is None:
+        l2 = mycc.l2
+    l2 = mpi.gather(l2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
+    return l1, l2
+
 def _diff_norm(mycc, t1new, t2new, t1, t2):
     norm2 = comm.allreduce(numpy.linalg.norm(t2new - t2)**2)
     norm1 = numpy.linalg.norm(t1new - t1)**2
@@ -898,6 +909,7 @@ class CCSD(ccsd.CCSD):
 
     distribute_amplitudes_ = distribute_amplitudes_
     gather_amplitudes = gather_amplitudes
+    gather_lambda = gather_lambda
 
     def ccsd_t(self):
         from mpi4pyscf.cc import ccsd_t

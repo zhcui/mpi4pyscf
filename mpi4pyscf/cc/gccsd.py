@@ -43,7 +43,7 @@ from mpi4pyscf.cc.ccsd import (kernel, _task_location, _sync_,
                                _pack_scf, _diff_norm, _rotate_vir_block,
                                amplitudes_to_vector, vector_to_amplitudes,
                                distribute_amplitudes_, gather_amplitudes,
-                               restore_from_diis_)
+                               gather_lambda, restore_from_diis_)
 from mpi4pyscf.cc import gccsd_lambda
 from mpi4pyscf.cc import gccsd_rdm
 
@@ -830,6 +830,7 @@ class GCCSD(gccsd.GCCSD):
 
     distribute_amplitudes_ = distribute_amplitudes_
     gather_amplitudes = gather_amplitudes
+    gather_lambda = gather_lambda
 
     def amplitudes_to_vector(self, t1, t2, out=None):
         return amplitudes_to_vector(t1, t2, out)

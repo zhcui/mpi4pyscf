@@ -139,6 +139,7 @@ mycc.conv_tol_normt = 1e-6
 mycc.max_cycle = 50
 mycc.kernel()
 rdm1_ref = mycc.make_rdm1(ao_repr=True)
+rdm2_ref = mycc.make_rdm2(ao_repr=True)
 
 E_ref = mycc.e_corr
 
@@ -170,3 +171,11 @@ print (rdm1)
 
 print ("rdm1 diff to ref: ", max_abs(rdm1 - rdm1_ref))
 assert max_abs(rdm1 - rdm1_ref) < 1e-7
+
+rdm2 = mycc.make_rdm2(ao_repr=True)
+
+print ("rdm2")
+print (rdm2.shape)
+
+print ("rdm2 diff to ref: ", max_abs(rdm2 - rdm2_ref))
+assert max_abs(rdm2 - rdm2_ref) < 1e-7

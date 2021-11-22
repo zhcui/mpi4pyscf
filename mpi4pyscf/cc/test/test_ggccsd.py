@@ -131,18 +131,30 @@ mf.mol.verbose = mf.verbose = 5
 
 # test class
 mf = mf.newton()
+
+# ref serial GCCSD
+from libdmet.solver import cc as cc_solver
+mycc = cc_solver.GGCCSD(mf)
+mycc.conv_tol = 1e-10
+mycc.conv_tol_normt = 1e-8
+mycc.max_cycle = 50
+mycc.kernel()
+
+rdm1_ref = mycc.make_rdm1(ao_repr=True)
+rdm2_ref = mycc.make_rdm2(ao_repr=True)
+
+
 mycc = mpicc.gccsd.GGCCSD(mf)
-mycc.conv_tol = 1e-8
-mycc.conv_tol_normt = 1e-6
+mycc.conv_tol = 1e-10
+mycc.conv_tol_normt = 1e-8
 mycc.max_cycle = 50
 mycc.kernel()
 
 mycc.save_amps()
 
-
 mycc = mpicc.gccsd.GGCCSD(mf)
-mycc.conv_tol = 1e-8
-mycc.conv_tol_normt = 1e-6
+mycc.conv_tol = 1e-10
+mycc.conv_tol_normt = 1e-8
 mycc.max_cycle = 50
 mycc.restore_from_h5(umat=np.eye(mycc.nmo))
 mycc.kernel()
@@ -150,7 +162,17 @@ mycc.kernel()
 print ("E diff: ", abs(mycc.e_corr - -0.134698069373674))
 assert abs(mycc.e_corr - -0.134698069373674) < 1e-8
 mycc.solve_lambda()
-rdm1 = mycc.make_rdm1()
+
+print ("-" * 79)
+rdm1 = mycc.make_rdm1(ao_repr=True)
 
 print ("rdm1")
 print (rdm1)
+print ("rdm1 diff to ref", max_abs(rdm1 - rdm1_ref))
+
+print ("-" * 79)
+rdm2 = mycc.make_rdm2(ao_repr=True)
+
+print ("rdm2")
+print (rdm2.shape)
+print ("rdm2 diff to ref", max_abs(rdm2 - rdm2_ref))
