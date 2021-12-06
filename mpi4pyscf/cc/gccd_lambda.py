@@ -37,7 +37,7 @@ einsum = lib.einsum
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
            max_cycle=50, tol=1e-6, verbose=None,
-           fintermediates=None, fupdate=None):
+           fintermediates=None, fupdate=None, approx_l=False):
     """
     CCSD lambda kernel.
     """
@@ -67,6 +67,12 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     
     t1 = np.zeros_like(t1)
     l1 = np.zeros_like(l1)
+    
+    if approx_l:
+        mycc.l1 = l1
+        mycc.l2 = l2
+        conv = True
+        return conv, l1, l2
 
     if fintermediates is None:
         fintermediates = make_intermediates

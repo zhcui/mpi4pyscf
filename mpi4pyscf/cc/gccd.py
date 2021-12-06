@@ -374,7 +374,7 @@ def init_amps(mycc, eris=None):
     #t1T = eris.fock[nocc:, :nocc] / eia.T
     t1T = np.zeros_like(eris.fock[nocc:, :nocc])
     loc0, loc1 = _task_location(nvir)
-
+    
     t2T = np.empty((loc1-loc0, nvir, nocc, nocc))
     max_memory = mycc.max_memory - lib.current_memory()[0]
     blksize = int(min(nvir, max(BLKMIN, max_memory*.3e6/8/(nocc**2*nvir+1))))
@@ -384,7 +384,7 @@ def init_amps(mycc, eris=None):
         t2T[p0:p1] = (eris_vvoo / lib.direct_sum('ia, jb -> abij', eia[:, loc0+p0:loc0+p1], eia))
         emp2 += np.einsum('abij, abij', t2T[p0:p1], eris_vvoo.conj(), optimize=True).real
         eris_vvoo = None
-
+    
     mycc.emp2 = comm.allreduce(emp2) * 0.25
     logger.info(mycc, 'Init t2, MP2 energy = %.15g', mycc.emp2)
     logger.timer(mycc, 'init mp2', *time0)
@@ -473,8 +473,7 @@ class GCCD(mpigccsd.GCCSD):
     # ************************************************************************
 
     def solve_lambda(self, t1=None, t2=None, l1=None, l2=None,
-                     eris=None):
-        
+                     eris=None, approx_l=False):
         if t1 is not None:
             t1 = np.zeros_like(t1)
         if l1 is not None:
@@ -484,7 +483,7 @@ class GCCD(mpigccsd.GCCSD):
                 mpigccd_lambda.kernel(self, eris, t1, t2, l1, l2,
                                       max_cycle=self.max_cycle,
                                       tol=self.conv_tol_normt,
-                                      verbose=self.verbose)
+                                      verbose=self.verbose, approx_l=approx_l)
         return self.l1, self.l2
 
     def make_rdm1(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):

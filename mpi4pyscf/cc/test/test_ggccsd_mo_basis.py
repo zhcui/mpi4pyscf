@@ -119,7 +119,7 @@ print (H0)
 print (H1.shape)
 print (H2.shape)
 Ham = integral.Integral(H1.shape[-1], True, False, H0, {"cd": H1[None]},
-        {"ccdd": H2[None]}, ovlp=ovlp)
+                        {"ccdd": H2[None]}, ovlp=ovlp)
 
 scfsolver = scf.SCF(newton_ah=True)
 scfsolver.set_system(mol.nelectron, 0, False, True, max_memory=mol.max_memory)
@@ -131,6 +131,29 @@ mf.mol.verbose = mf.verbose = 5
 
 # test class
 mf = mf.newton()
+
+rdm1 = mf.make_rdm1()
+C = mf.mo_coeff
+
+from libdmet.basis_transform import make_basis
+from libdmet.utils import mdot
+hcore_mo = mdot(C.conj().T, mf.get_hcore(), C)
+ovlp_mo  = mdot(C.conj().T, mf.get_ovlp(), C)
+rdm1_mo  = make_basis.transform_rdm1_to_mo_mol(rdm1, C, mf.get_ovlp())
+eri_mo = ao2mo.kernel(mf._eri, C)
+
+Ham = integral.Integral(hcore_mo.shape[-1], True, False, H0, {"cd": hcore_mo[None]},
+                        {"ccdd": eri_mo[None]}, ovlp=ovlp_mo)
+
+scfsolver = scf.SCF(newton_ah=True)
+scfsolver.set_system(mol.nelectron, 0, False, True, max_memory=mol.max_memory)
+scfsolver.set_integral(Ham)
+E_HF, rhoHF = scfsolver.GGHF(tol=1e-8, InitGuess=rdm1_mo)
+
+mf = scfsolver.mf
+mf.mo_coeff = np.eye(mf.mo_coeff.shape[-1])
+
+mf.mol.verbose = mf.verbose = 5
 
 # ref serial GCCSD
 from libdmet.solver import cc as cc_solver

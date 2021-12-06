@@ -860,12 +860,12 @@ class GCCSD(gccsd.GCCSD):
     # ************************************************************************
 
     def solve_lambda(self, t1=None, t2=None, l1=None, l2=None,
-                     eris=None):
+                     eris=None, approx_l=False):
         self.converged_lambda, self.l1, self.l2 = \
                 gccsd_lambda.kernel(self, eris, t1, t2, l1, l2,
                                     max_cycle=self.max_cycle,
                                     tol=self.conv_tol_normt,
-                                    verbose=self.verbose)
+                                    verbose=self.verbose, approx_l=approx_l)
         return self.l1, self.l2
 
     def make_rdm1(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
@@ -1124,7 +1124,13 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     
     nocc = eris.nocc
     nao, nmo = eris.mo_coeff.shape
+
+    # ZHC NOTE special case where mo_coeff is identity
+    if (nao == nmo) and (la.norm(eris.mo_coeff - np.eye(eris.mo_coeff.shape[-1])) < 1e-12):
+        return _make_eris_incore_ghf_identity(mycc, mo_coeff=mo_coeff, ao2mofn=ao2mofn)
+
     nvir = nmo - nocc
+    nao_pair = nao * (nao + 1) // 2
     nmo_pair = nmo * (nmo + 1) // 2
     vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
     vloc0, vloc1 = vlocs[rank]
@@ -1132,11 +1138,11 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
 
     # distribute ij, trans kl
-    plocs = [_task_location(nmo_pair, task_id) for task_id in range(mpi.pool.size)]
+    plocs = [_task_location(nao_pair, task_id) for task_id in range(mpi.pool.size)]
     ploc0, ploc1 = plocs[rank]
     pseg = ploc1 - ploc0
     if rank == 0:
-        eri_data = eri_sliced = mycc._scf._eri
+        eri_data = eri_sliced = ao2mo.restore(4, mycc._scf._eri, nao)
         eri_sliced = [eri_sliced[p0:p1] for (p0, p1) in plocs]
     else:
         eri_data = None
@@ -1227,6 +1233,101 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     f.close() 
     comm.Barrier()
     os.remove("gccsd_eri_tmp_%s.h5"%rank)
+    mycc._eris = eris
+    log.timer('CCSD integral transformation   ', *cput0)
+    return eris
+
+@mpi.parallel_call
+def _make_eris_incore_ghf_identity(mycc, mo_coeff=None, ao2mofn=None):
+    """
+    Make physist eri with incore ao2mo, for GGHF.
+    Specical case with identity mo_coeff.
+    """ 
+    cput0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.Logger(mycc.stdout, mycc.verbose)
+    _sync_(mycc)
+    eris = gccsd._PhysicistsERIs()
+    
+    if rank == 0:
+        eris._common_init_(mycc, mo_coeff)
+        comm.bcast((eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy))
+    else:
+        eris.mol = mycc.mol
+        eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy = comm.bcast(None)
+    
+    nocc = eris.nocc
+    nao, nmo = eris.mo_coeff.shape
+    nvir = nmo - nocc
+    nao_pair = nao * (nao + 1) // 2
+    nmo_pair = nmo * (nmo + 1) // 2
+    vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
+    vloc0, vloc1 = vlocs[rank]
+    vseg = vloc1 - vloc0
+    assert nao == nmo
+    cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
+    
+    # ZHC NOTE directly distribute the integral from root 0.
+    if rank == 0:
+        eri_mo = ao2mo.restore(1, mycc._scf._eri, nmo)
+        eri_mo = eri_mo.transpose(0, 2, 1, 3) - eri_mo.transpose(0, 2, 3, 1)
+    else:
+        eri_mo = None
+
+    # oooo
+    if rank == 0:
+        eris.oooo = eri_mo[:nocc, :nocc, :nocc, :nocc]
+        mpi.bcast(eris.oooo)
+    else:
+        eris.oooo = mpi.bcast(None)
+    
+    # ooox
+    if rank == 0:
+        eri_sliced = [eri_mo[:nocc, :nocc, :nocc, nocc+p0:nocc+p1] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    eris.ooox = mpi.scatter(eri_sliced, root=0)
+    eri_slice = None
+    
+    # oxov
+    if rank == 0:
+        eri_sliced = [eri_mo[:nocc, nocc+p0:nocc+p1, :nocc, nocc:] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    eris.oxov = mpi.scatter(eri_sliced, root=0)
+    eri_slice = None
+    
+    # oxvv
+    if rank == 0:
+        eri_sliced = [eri_mo[:nocc, nocc+p0:nocc+p1, nocc:, nocc:] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    eris.oxvv = mpi.scatter(eri_sliced, root=0)
+    eri_slice = None
+
+    # ovvx
+    if rank == 0:
+        eri_sliced = [eri_mo[:nocc, nocc:, nocc:, nocc+p0:nocc+p1] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    eris.ovvx = mpi.scatter(eri_sliced, root=0)
+    eri_slice = None
+    
+    # xvoo
+    if rank == 0:
+        eri_sliced = [eri_mo[nocc+p0:nocc+p1, nocc:, :nocc, :nocc] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    eris.xvoo = mpi.scatter(eri_sliced, root=0)
+    eri_slice = None
+    
+    # xvvv
+    if rank == 0:
+        eri_sliced = [eri_mo[nocc+p0:nocc+p1, nocc:, nocc:, nocc:] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    eris.xvvv = mpi.scatter(eri_sliced, root=0)
+    eri_slice = None
+    
     mycc._eris = eris
     log.timer('CCSD integral transformation   ', *cput0)
     return eris

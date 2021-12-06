@@ -80,6 +80,7 @@ def make_rdm1(mycc, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
         l1 = mycc.l1
     if l2 is None:
         l2 = mycc.l2
+    
     if l1 is None:
         l1, l2 = mycc.solve_lambda(t1, t2)
     d1 = _gamma1_intermediates(mycc, t1, t2, l1, l2)

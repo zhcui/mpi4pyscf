@@ -154,16 +154,16 @@ E = mycc.e_corr
 print ("E diff to ref: ", abs(E - E_ref))
 assert abs(E - E_ref) < 1e-7
 
-#mycc.save_amps()
-#
-#mycc = mpicc.gccd.GGCCD(mf)
-#mycc.conv_tol = 1e-8
-#mycc.conv_tol_normt = 1e-6
-#mycc.max_cycle = 50
-#mycc.restore_from_h5(umat=np.eye(mycc.nmo))
-#mycc.kernel()
+mycc.save_amps()
 
-mycc.solve_lambda()
+mycc = mpicc.gccd.GGCCD(mf)
+mycc.conv_tol = 1e-8
+mycc.conv_tol_normt = 1e-6
+mycc.max_cycle = 50
+mycc.restore_from_h5(umat=np.eye(mycc.nmo))
+mycc.kernel()
+
+mycc.solve_lambda(approx_l=False)
 rdm1 = mycc.make_rdm1(ao_repr=True)
 
 print ("rdm1")
