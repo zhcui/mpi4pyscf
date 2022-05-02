@@ -89,8 +89,10 @@ def update_amps(mycc, t1, t2, eris):
     #tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov, optimize=True)
     tmp  = mpi.allgather(tmp)
 
-    tmp2  = einsum('eamn, mnie -> ai', t2T, eris.ooox)
-    tmp2 += einsum('efim, mafe -> ai', t2T, eris.ovvx)
+    #tmp2  = einsum('eamn, mnie -> ai', t2T, eris.ooox)
+    tmp2  = einsum('eamn, einm -> ai', t2T, eris.xooo)
+    #tmp2 += einsum('efim, mafe -> ai', t2T, eris.ovvx)
+    tmp2 += einsum('efim, efam -> ai', t2T, eris.xvvo)
     tmp2 *= 0.5
     tmp2  = mpi.allreduce(tmp2)
     tmp  += tmp2
@@ -323,7 +325,8 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
         t2T_tmp = None
     Wmbej *= 0.5
 
-    Wmbej -= np.asarray(eris.oxov).transpose(2, 3, 1, 0)
+    #Wmbej -= np.asarray(eris.oxov).transpose(2, 3, 1, 0)
+    Wmbej -= np.asarray(eris.xovo).transpose(3, 2, 0, 1)
     return Wmbej
 
 @mpi.parallel_call(skip_args=[3], skip_kwargs=['eris'])

@@ -157,16 +157,20 @@ def make_intermediates(mycc, t1, t2, eris):
     tmp *= 0.5
     v2  += mpi.allreduce(tmp)
     
-    v4 -= np.asarray(eris.oxov).transpose(0, 1, 3, 2)
+    #v4 -= np.asarray(eris.oxov).transpose(0, 1, 3, 2)
+    v4 -= np.asarray(eris.xovo).transpose(1, 0, 2, 3)
     
     v5  = fvo + mpi.allgather(einsum('kc, bcjk -> bj', fov, t2T))
     #tmp = fvo[vloc0:vloc1] #+ einsum('cdkl, dl -> ck', eris.xvoo, t1T)
     #v5 += mpi.allreduce(np.einsum('ck, bk, cj -> bj', tmp, t1T, t1T[vloc0:vloc1], optimize=True))
-     
-    v5 += mpi.allreduce(einsum('kljc, cbkl -> bj', eris.ooox, t2T)) * 0.5
+    
+    #v5 += mpi.allreduce(einsum('kljc, cbkl -> bj', eris.ooox, t2T)) * 0.5
+    v5 += mpi.allreduce(einsum('cjlk, cbkl -> bj', eris.xooo, t2T)) * 0.5
     tmp = 0.0
+    # ZHC NOTE FIXME it seems that the tmp does not contribute to rdm
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        tmp += einsum('kbcd, cdjk -> bj', eris.oxvv[:, :, p0:p1], t2T_tmp)
+        #tmp += einsum('kbcd, cdjk -> bj', eris.oxvv[:, :, p0:p1], t2T_tmp)
+        tmp -= einsum('bkcd, cdjk -> bj', eris.xovv[:, :, p0:p1], t2T_tmp)
         t2T_tmp = None
     tmp *= 0.5
     tmp  = mpi.allgather(tmp)
@@ -204,15 +208,18 @@ def make_intermediates(mycc, t1, t2, eris):
 
     wovoo = 0.0
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
-        wovoo += einsum('icdb, dbjk -> icjk', eris.oxvv[:, :, p0:p1], tauT_tmp)
+        #wovoo += einsum('icdb, dbjk -> icjk', eris.oxvv[:, :, p0:p1], tauT_tmp)
+        wovoo -= einsum('cidb, dbjk -> icjk', eris.xovv[:, :, p0:p1], tauT_tmp)
         tauT_tmp = None
     wovoo *= 0.25
 
-    wovoo += np.asarray(eris.ooox.transpose(2, 3, 0, 1)) * 0.5
+    #wovoo += np.asarray(eris.ooox.transpose(2, 3, 0, 1)) * 0.5
+    wovoo += np.asarray(eris.xooo.transpose(1, 0, 2, 3)) * (-0.5)
     #wovoo += einsum('icbk, bj -> icjk', v4, t1T)
 
     tauT = tauT * 0.25
-    eris_vooo = eris.ooox.transpose(3, 0, 1, 2)
+    #eris_vooo = eris.ooox.transpose(3, 0, 1, 2)
+    eris_vooo = eris.xooo.transpose(0, 3, 2, 1)
     for task_id, eri_tmp, p0, p1 in _rotate_vir_block(eris_vooo, vlocs=vlocs):
         wovoo -= einsum('blij, cbkl -> icjk', eri_tmp, t2T[:, p0:p1])
         imds.wvvvo[:, :, p0:p1] = einsum('bcjl, ajlk -> bcak', tauT, eri_tmp)
@@ -228,10 +235,15 @@ def make_intermediates(mycc, t1, t2, eris):
     #    v4_tmp = None
     #v4 = None
 
-    wvvvo = np.asarray(eris.ovvx).conj().transpose(3, 2, 1, 0) * 0.5
-    eris_ovvv = eris.oxvv
+    #wvvvo = np.asarray(eris.ovvx).conj().transpose(3, 2, 1, 0) * 0.5
+    wvvvo = np.asarray(eris.xvvo) * 0.5
+    #eris_ovvv = eris.oxvv
+    #for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
+    #    wvvvo[:, p0:p1] -= einsum('kbad, cdjk -> bcaj', eris_ovvv, t2T_tmp)
+    #    t2T_tmp = None
+    eris_vovv = eris.xovv
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        wvvvo[:, p0:p1] -= einsum('kbad, cdjk -> bcaj', eris_ovvv, t2T_tmp)
+        wvvvo[:, p0:p1] -= einsum('bkda, cdjk -> bcaj', eris_vovv, t2T_tmp)
         t2T_tmp = None
 
     imds.wvvvo -= wvvvo
