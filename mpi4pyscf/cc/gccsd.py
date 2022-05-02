@@ -111,8 +111,8 @@ def update_amps(mycc, t1, t2, eris):
     # T2 equation
     Ftmp = Fvv - 0.5 * np.dot(t1T, Fov)
     t2Tnew = einsum('aeij, be -> abij', t2T, Ftmp)
-    t2T_tmp = mpi.alltoall([t2Tnew[:, p0:p1] for p0, p1 in vlocs],
-                           split_recvbuf=True)
+    t2T_tmp = mpi.alltoall_new([t2Tnew[:, p0:p1] for p0, p1 in vlocs],
+                               split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = t2T_tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -139,7 +139,7 @@ def update_amps(mycc, t1, t2, eris):
     tauT = None
 
     tmp = einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
-    tmp = mpi.allgather(tmp) # bmij
+    tmp = mpi.allgather_new(tmp) # bmij
     tmp = einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
 
     Wvovo = cc_Wovvo(t1T, t2T, eris, vlocs=vlocs).transpose(2, 0, 1, 3)
@@ -150,8 +150,8 @@ def update_amps(mycc, t1, t2, eris):
 
     tmp = tmp - tmp.transpose(0, 1, 3, 2)
     t2Tnew += tmp
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
+    tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
+                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -164,8 +164,8 @@ def update_amps(mycc, t1, t2, eris):
 
     tmp = einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
     t2Tnew += tmp
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
+    tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
+                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -200,7 +200,7 @@ def make_tauT(t1T, t2T, fac=1, vlocs=None):
     tauT = np.einsum('ai, bj -> abij', t1T[vloc0:vloc1] * (fac * 0.5), t1T, optimize=True)
     tauT = tauT - tauT.transpose(0, 1, 3, 2)
     ##:tauT = tauT - tauT.transpose(1, 0, 2, 3)
-    tauT_tmp = mpi.alltoall([tauT[:, p0:p1] for p0, p1 in vlocs], split_recvbuf=True)
+    tauT_tmp = mpi.alltoall_new([tauT[:, p0:p1] for p0, p1 in vlocs], split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tauT_tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         tauT[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -312,8 +312,8 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None):
     tmp = einsum('bm, mafe -> abfe', t1T, eris.oxvv)
     Wabef += tmp
 
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
+    tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
+                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nvir, nvir)
         Wabef[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -456,7 +456,7 @@ def test_make_tau(mycc, t1T=None, t2T=None, fac=1, ref=None):
     if t2T is None:
         t2T = mycc.t2.transpose(2, 3, 0, 1)
     tauT = make_tauT(t1T, t2T, fac=fac)
-    tau = mpi.gather(tauT).transpose(2, 3, 0, 1)
+    tau = mpi.gather_new(tauT).transpose(2, 3, 0, 1)
     if rank == 0:
         tau_diff = la.norm(tau - ref)
         assert tau_diff < 1e-10
@@ -527,7 +527,7 @@ def test_cc_Wvvvv(mycc, t1T=None, t2T=None, ref=None):
     if eris is None:
         mycc.ao2mo()
         eris = mycc._eris
-    Wvvvv = mpi.gather(cc_Wvvvv(t1T, t2T, eris))
+    Wvvvv = mpi.gather_new(cc_Wvvvv(t1T, t2T, eris))
     if rank == 0:
         assert la.norm(Wvvvv - ref) < 1e-10
 
@@ -542,7 +542,7 @@ def test_cc_Wovvo(mycc, t1T=None, t2T=None, ref=None):
         mycc.ao2mo()
         eris = mycc._eris
     Wovvo = cc_Wovvo(t1T, t2T, eris)
-    Wovvo = mpi.gather(Wovvo.transpose(2, 0, 1, 3)).transpose(1, 2, 0, 3)
+    Wovvo = mpi.gather_new(Wovvo.transpose(2, 0, 1, 3)).transpose(1, 2, 0, 3)
     if rank == 0:
         assert la.norm(Wovvo - ref) < 1e-10
 
@@ -579,9 +579,9 @@ def test_lambda_imds(mycc, ref):
     imds.v2 = np.asarray(imds.v2)
     imds.w3 = np.asarray(imds.w3)
     imds.woooo = np.asarray(imds.woooo)
-    imds.wovvo = mpi.gather(np.asarray(imds.wovvo).transpose(1, 0, 2, 3)).transpose(1, 0, 2, 3)
-    imds.wovoo = mpi.gather(np.asarray(imds.wovoo).transpose(1, 0, 2, 3)).transpose(1, 0, 2, 3)
-    imds.wvvvo = mpi.gather(np.asarray(imds.wvvvo))
+    imds.wovvo = mpi.gather_new(np.asarray(imds.wovvo).transpose(1, 0, 2, 3)).transpose(1, 0, 2, 3)
+    imds.wovoo = mpi.gather_new(np.asarray(imds.wovoo).transpose(1, 0, 2, 3)).transpose(1, 0, 2, 3)
+    imds.wvvvo = mpi.gather_new(np.asarray(imds.wvvvo))
     return imds
 
 @mpi.parallel_call
@@ -1109,140 +1109,8 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
 def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     """
     Make physist eri with incore ao2mo, for GGHF.
-    """ 
-    cput0 = (logger.process_clock(), logger.perf_counter())
-    log = logger.Logger(mycc.stdout, mycc.verbose)
-    _sync_(mycc)
-    eris = gccsd._PhysicistsERIs()
-    
-    if rank == 0:
-        eris._common_init_(mycc, mo_coeff)
-        comm.bcast((eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy))
-    else:
-        eris.mol = mycc.mol
-        eris.mo_coeff, eris.fock, eris.nocc, eris.mo_energy = comm.bcast(None)
-    
-    nocc = eris.nocc
-    nao, nmo = eris.mo_coeff.shape
-
-    # ZHC NOTE special case where mo_coeff is identity
-    if (nao == nmo) and (la.norm(eris.mo_coeff - np.eye(eris.mo_coeff.shape[-1])) < 1e-12):
-        return _make_eris_incore_ghf_identity(mycc, mo_coeff=mo_coeff, ao2mofn=ao2mofn)
-
-    nvir = nmo - nocc
-    nao_pair = nao * (nao + 1) // 2
-    nmo_pair = nmo * (nmo + 1) // 2
-    vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
-    vloc0, vloc1 = vlocs[rank]
-    vseg = vloc1 - vloc0
-    cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
-
-    # distribute ij, trans kl
-    plocs = [_task_location(nao_pair, task_id) for task_id in range(mpi.pool.size)]
-    ploc0, ploc1 = plocs[rank]
-    pseg = ploc1 - ploc0
-    if rank == 0:
-        eri_data = eri_sliced = ao2mo.restore(4, mycc._scf._eri, nao)
-        eri_sliced = [eri_sliced[p0:p1] for (p0, p1) in plocs]
-    else:
-        eri_data = None
-        eri_sliced = None
-     
-    eri_mo = mpi.scatter(eri_sliced, root=0, data=eri_data)
-    eri_sliced = None
-    eri_data = None
-    
-    mo = eris.mo_coeff
-    klmosym, nkl_pair, mokl, klshape = ao2mo.incore._conc_mos(mo, mo, compact=False)
-    eri_mo = _ao2mo.nr_e2(eri_mo, mokl, klshape, aosym='s4', mosym=klmosym)
-    
-    cput1 = log.timer('CCSD ao2mo nr_e2:              ', *cput1)
-
-    # distribute over k, trans ij
-    plocs = [_task_location(nmo, task_id) for task_id in range(mpi.pool.size)]
-    ploc0, ploc1 = plocs[rank]
-    pseg = ploc1 - ploc0
-    eri_mo = mpi.alltoall([eri_mo[:, p0*nmo:p1*nmo] for p0, p1 in plocs], split_recvbuf=True)
-    eri_mo = np.asarray(np.vstack(eri_mo).T, order='C')
-    
-    fname = "gccsd_eri_tmp_%s.h5"%rank
-    f = h5py.File(fname, 'w')
-    eri_phys = f.create_dataset('eri_phys', (pseg, nmo, nmo, nmo), 'f8', 
-                                chunks=(pseg, 1, nmo, nmo))
-    
-    unit = pseg * nmo * nmo * 2
-    mem_now = lib.current_memory()[0]
-    max_memory = max(0, mycc.max_memory - mem_now)
-    blksize = min(nmo, max(BLKMIN, int((max_memory*0.9e6/8)/unit)))
-    
-    blksize = 3
-    for p0, p1 in lib.prange(0, nmo, blksize):
-        ijmosym, nij_pair, moij, ijshape = ao2mo.incore._conc_mos(mo[:, p0:p1], mo, compact=False)
-        eri = _ao2mo.nr_e2(eri_mo, moij, ijshape, aosym='s4', mosym=ijmosym)
-        
-        eri = eri.reshape(pseg, nmo, p1-p0, nmo)
-        eri_phys[:, p0:p1] = eri.transpose(0, 2, 1, 3) - eri.transpose(0, 2, 3, 1)
-        eri = None
-
-    f.close()
-    comm.Barrier()
-    cput1 = log.timer('CCSD ao2mo nr_e1:              ', *cput1)
-
-    o_idx = -1
-    v_idx = mpi.pool.size
-    for r, (p0, p1) in enumerate(plocs):
-        if p0 <= nocc - 1 < p1:
-            o_idx = r
-        if p0 <= nocc < p1:
-            v_idx = r
-            break
-    o_files = np.arange(mpi.pool.size)[:(o_idx+1)]
-    v_files = np.arange(mpi.pool.size)[v_idx:]
-
-    eris.oooo = np.empty((nocc, nocc, nocc, nocc))
-    eris.ooox = np.empty((nocc, nocc, nocc, vseg))
-    eris.oxov = np.empty((nocc, vseg, nocc, nvir))
-    eris.oxvv = np.empty((nocc, vseg, nvir, nvir))
-    eris.ovvx = np.empty((nocc, nvir, nvir, vseg))
-    eris.xvoo = np.empty((vseg, nvir, nocc, nocc))
-    eris.xvvv = np.empty((vseg, nvir, nvir, nvir))
-    for r in range(mpi.pool.size):
-        f = lib.H5TmpFile(filename="gccsd_eri_tmp_%s.h5"%r, mode='r')
-        eri_phys = f["eri_phys"]
-        if r in o_files:
-            p0, p1 = plocs[r]
-            p1 = min(p1, nocc)
-            pseg = p1 - p0
-            if pseg > 0:
-                eris.oooo[p0:p1] = eri_phys[:pseg, :nocc, :nocc, :nocc]
-                eris.ooox[p0:p1] = eri_phys[:pseg, :nocc, :nocc, nocc+vloc0:nocc+vloc1]
-                eris.oxov[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, :nocc, nocc:]
-                eris.oxvv[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, nocc:, nocc:]
-                eris.ovvx[p0:p1] = eri_phys[:pseg, nocc:, nocc:, nocc+vloc0:nocc+vloc1]
-        
-        if r in v_files:
-            p00, p10 = plocs[r]
-            p0 = max(p00, nocc+vloc0)
-            p1 = min(p10, nocc+vloc1)
-            pseg = p1 - p0
-            if pseg > 0:
-                eris.xvoo[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, :nocc, :nocc]
-                eris.xvvv[p0-(nocc+vloc0):p1-(nocc+vloc0)] = eri_phys[p0-p00:p1-p00, nocc:, nocc:, nocc:]
-    cput1 = log.timer('CCSD ao2mo load:               ', *cput1)
-    
-    f.close() 
-    comm.Barrier()
-    os.remove("gccsd_eri_tmp_%s.h5"%rank)
-    mycc._eris = eris
-    log.timer('CCSD integral transformation   ', *cput0)
-    return eris
-
-@mpi.parallel_call
-def _make_eris_incore_ghf_identity(mycc, mo_coeff=None, ao2mofn=None):
     """
-    Make physist eri with incore ao2mo, for GGHF.
-    Specical case with identity mo_coeff.
-    """ 
+    from libdmet.utils import take_eri
     cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.Logger(mycc.stdout, mycc.verbose)
     _sync_(mycc)
@@ -1257,79 +1125,118 @@ def _make_eris_incore_ghf_identity(mycc, mo_coeff=None, ao2mofn=None):
     
     nocc = eris.nocc
     nao, nmo = eris.mo_coeff.shape
+
     nvir = nmo - nocc
-    nao_pair = nao * (nao + 1) // 2
-    nmo_pair = nmo * (nmo + 1) // 2
     vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
     vloc0, vloc1 = vlocs[rank]
     vseg = vloc1 - vloc0
-    assert nao == nmo
     cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
     
-    # ZHC NOTE directly distribute the integral from root 0.
     if rank == 0:
-        eri_mo = ao2mo.restore(1, mycc._scf._eri, nmo)
-        eri_mo = eri_mo.transpose(0, 2, 1, 3) - eri_mo.transpose(0, 2, 3, 1)
-    else:
-        eri_mo = None
-
+        if callable(ao2mofn):
+            raise NotImplementedError
+        else:
+            assert eris.mo_coeff.dtype == np.double
+            if (nao == nmo) and (la.norm(eris.mo_coeff - np.eye(nmo)) < 1e-12):
+                # ZHC NOTE special treatment for OO-CCD,
+                # where the ao2mo is not needed for identity mo_coeff.
+                eri = mycc._scf._eri
+            else:
+                eri = ao2mo.kernel(mycc._scf._eri, eris.mo_coeff)
+            if eri.size == nmo**4:
+                eri = ao2mo.restore(8, eri, nmo)
+                
+    comm.Barrier()
+    cput2 = log.timer('CCSD ao2mo:                     ', *cput1)
+    
+    # chunck and scatter:
+    o = np.arange(0, nocc)
+    v = np.arange(nocc, nmo)
+    
     # oooo
     if rank == 0:
-        eris.oooo = eri_mo[:nocc, :nocc, :nocc, :nocc]
+        tmp = take_eri(eri, o, o, o, o)
+        eris.oooo = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
+        tmp = None
         mpi.bcast(eris.oooo)
     else:
         eris.oooo = mpi.bcast(None)
+    cput3 = log.timer('CCSD bcast   oooo:              ', *cput2)
     
     # ooox
     if rank == 0:
-        eri_sliced = [eri_mo[:nocc, :nocc, :nocc, nocc+p0:nocc+p1] for (p0, p1) in vlocs]
+        tmp = take_eri(eri, o, o, o, v)
+        ooov = tmp.transpose(0, 2, 1, 3) - tmp.transpose(2, 0, 1, 3)
+        tmp = None
+        eri_sliced = [ooov[:, :, :, p0:p1] for (p0, p1) in vlocs]
     else:
         eri_sliced = None
-    eris.ooox = mpi.scatter(eri_sliced, root=0)
-    eri_slice = None
+    ooov = None
+    eris.ooox = mpi.scatter_new(eri_sliced, root=0)
+    eri_sliced = None
+    cput4 = log.timer('CCSD scatter ooov:              ', *cput3)
     
     # oxov
     if rank == 0:
-        eri_sliced = [eri_mo[:nocc, nocc+p0:nocc+p1, :nocc, nocc:] for (p0, p1) in vlocs]
+        tmp_oovv = take_eri(eri, o, o, v, v)
+        tmp_ovvo = take_eri(eri, o, v, v, o)
+        ovov = tmp_oovv.transpose(0, 2, 1, 3) - tmp_ovvo.transpose(0, 2, 3, 1)
+        tmp_oovv = tmp_ovvo = None
+        eri_sliced = [ovov[:, p0:p1] for (p0, p1) in vlocs]
     else:
         eri_sliced = None
-    eris.oxov = mpi.scatter(eri_sliced, root=0)
-    eri_slice = None
+    ovov = None
+    eris.oxov = mpi.scatter_new(eri_sliced, root=0)
+    eri_sliced = None
+    cput5 = log.timer('CCSD scatter oxov:              ', *cput4)
     
-    # oxvv
+    # oxvv, ovvx
     if rank == 0:
-        eri_sliced = [eri_mo[:nocc, nocc+p0:nocc+p1, nocc:, nocc:] for (p0, p1) in vlocs]
+        tmp = take_eri(eri, o, v, v, v)
+        ovvv = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
+        tmp = None
+        eri_sliced = [ovvv[:, p0:p1] for (p0, p1) in vlocs]
     else:
         eri_sliced = None
-    eris.oxvv = mpi.scatter(eri_sliced, root=0)
-    eri_slice = None
+    eris.oxvv = mpi.scatter_new(eri_sliced, root=0)
+    eri_sliced = None
+    if rank == 0:
+        eri_sliced = [ovvv[:, :, :, p0:p1] for (p0, p1) in vlocs]
+    else:
+        eri_sliced = None
+    ovvv = None
+    eris.ovvx = mpi.scatter_new(eri_sliced, root=0)
+    eri_sliced = None
+    cput6 = log.timer('CCSD scatter oxvv, ovvx:        ', *cput5)
 
-    # ovvx
-    if rank == 0:
-        eri_sliced = [eri_mo[:nocc, nocc:, nocc:, nocc+p0:nocc+p1] for (p0, p1) in vlocs]
-    else:
-        eri_sliced = None
-    eris.ovvx = mpi.scatter(eri_sliced, root=0)
-    eri_slice = None
-    
     # xvoo
     if rank == 0:
-        eri_sliced = [eri_mo[nocc+p0:nocc+p1, nocc:, :nocc, :nocc] for (p0, p1) in vlocs]
+        tmp = take_eri(eri, v, o, v, o)
+        vvoo = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
+        tmp = None
+        eri_sliced = [vvoo[p0:p1] for (p0, p1) in vlocs]
     else:
         eri_sliced = None
-    eris.xvoo = mpi.scatter(eri_sliced, root=0)
-    eri_slice = None
-    
+    vvoo = None
+    eris.xvoo = mpi.scatter_new(eri_sliced, root=0)
+    eri_sliced = None
+    cput7 = log.timer('CCSD scatter xvoo:              ', *cput6)
+
     # xvvv
     if rank == 0:
-        eri_sliced = [eri_mo[nocc+p0:nocc+p1, nocc:, nocc:, nocc:] for (p0, p1) in vlocs]
+        tmp = take_eri(eri, v, v, v, v)
+        vvvv = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
+        tmp = None
+        eri_sliced = [vvvv[p0:p1] for (p0, p1) in vlocs]
     else:
         eri_sliced = None
-    eris.xvvv = mpi.scatter(eri_sliced, root=0)
-    eri_slice = None
-    
+    vvvv = None
+    eris.xvvv = mpi.scatter_new(eri_sliced, root=0)
+    eri_sliced = None
+    cput8 = log.timer('CCSD scatter xvvv:              ', *cput7)
     mycc._eris = eris
     log.timer('CCSD integral transformation   ', *cput0)
+
     return eris
 
 if __name__ == '__main__':

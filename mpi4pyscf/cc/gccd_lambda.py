@@ -315,8 +315,8 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     wvovo = None
     tmp  = tmp - tmp.transpose(0, 1, 3, 2)
     l2Tnew += tmp
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
+    tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
+                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         l2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -329,8 +329,8 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
 
     tmp -= einsum('ca, bcij -> baij', tmp1vv, vvoo)
     l2Tnew += tmp
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
+    tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
+                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         l2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)

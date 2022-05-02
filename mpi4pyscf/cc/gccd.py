@@ -102,8 +102,8 @@ def update_amps(mycc, t1, t2, eris):
     # T2 equation
     Ftmp = Fvv #- 0.5 * np.dot(t1T, Fov)
     t2Tnew = einsum('aeij, be -> abij', t2T, Ftmp)
-    t2T_tmp = mpi.alltoall([t2Tnew[:, p0:p1] for p0, p1 in vlocs],
-                           split_recvbuf=True)
+    t2T_tmp = mpi.alltoall_new([t2Tnew[:, p0:p1] for p0, p1 in vlocs],
+                               split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = t2T_tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
@@ -142,8 +142,8 @@ def update_amps(mycc, t1, t2, eris):
 
     tmp = tmp - tmp.transpose(0, 1, 3, 2)
     t2Tnew += tmp
-    tmpT = mpi.alltoall([tmp[:, p0:p1] for p0, p1 in vlocs],
-                        split_recvbuf=True)
+    tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
+                            split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = tmpT[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
         t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
