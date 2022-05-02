@@ -187,8 +187,8 @@ class GlobalDataHandler(object):
             for p0, p1 in mpi.prange(vloc0, vloc1, blksize):
                 j0, j1 = p0 - vloc0, p1 - vloc0
                 sub_locs = comm.allgather((p0,p1))
-                vvvo = mpi.alltoall([eris.vvvo[:,:,q0:q1] for q0, q1 in sub_locs],
-                                    split_recvbuf=True)
+                vvvo = mpi.alltoall_new([eris.vvvo[:,:,q0:q1] for q0, q1 in sub_locs],
+                                        split_recvbuf=True)
                 save_vvop(j0, j1, vvvo)
                 cpu1 = log.timer_debug1('transpose %d:%d'%(p0,p1), *cpu1)
 

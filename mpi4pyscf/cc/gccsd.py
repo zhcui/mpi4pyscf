@@ -53,6 +53,8 @@ rank = mpi.rank
 einsum = lib.einsum
 #from functools import partial
 #einsum = partial(np.einsum, optimize=True)
+#einsum_mv = partial(np.einsum, optimize=True)
+einsum_mv = lib.einsum 
 
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
@@ -94,9 +96,9 @@ def update_amps(mycc, t1, t2, eris):
     t1Tnew  = np.dot(Fvv, t1T)
     t1Tnew -= np.dot(t1T, Foo)
 
-    tmp  = np.einsum('aeim, me -> ai', t2T, Fov, optimize=True)
-    #tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov, optimize=True)
-    tmp -= np.einsum('fn, anfi -> ai', t1T, eris.xovo, optimize=True)
+    tmp  = einsum_mv('aeim, me -> ai', t2T, Fov)
+    #tmp -= einsum_mv('fn, naif -> ai', t1T, eris.oxov)
+    tmp -= einsum_mv('fn, anfi -> ai', t1T, eris.xovo)
     tmp  = mpi.allgather(tmp)
     
     #tmp2  = einsum('eamn, mnie -> ai', t2T, eris.ooox)
@@ -222,7 +224,7 @@ def cc_Fov(t1T, eris, vlocs=None):
         ntasks = mpi.pool.size
         vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     fov  = eris.fock[:nocc, nocc:]
-    Fme  = np.einsum('efmn, fn -> em', eris.xvoo, t1T, optimize=True)
+    Fme  = einsum_mv('efmn, fn -> em', eris.xvoo, t1T)
     Fme  = mpi.allgather(Fme).T
     Fme += fov
     return Fme
@@ -247,8 +249,8 @@ def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     Fae = mpi.allreduce(Fae)
     tauT_tilde = None
     
-    #Fea += np.einsum('mafe, fm -> ea', eris.ovvx, t1T, optimize=True)
-    Fea += np.einsum('efam, fm -> ea', eris.xvvo, t1T, optimize=True)
+    #Fea += einsum_mv('mafe, fm -> ea', eris.ovvx, t1T)
+    Fea += einsum_mv('efam, fm -> ea', eris.xvvo, t1T)
     Fae += mpi.allgather(Fea).T
     return Fae
 
@@ -263,8 +265,8 @@ def cc_Foo(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     
     Fmi  = 0.5 * einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
     tauT_tilde = None
-    #Fmi += np.einsum('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1], optimize=True)
-    Fmi += np.einsum('einm, en -> mi', eris.xooo, t1T[vloc0:vloc1], optimize=True)
+    #Fmi += einsum_mv('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1])
+    Fmi += einsum_mv('einm, en -> mi', eris.xooo, t1T[vloc0:vloc1])
     Fmi  = mpi.allreduce(Fmi)
 
     fov = eris.fock[:nocc, nocc:]

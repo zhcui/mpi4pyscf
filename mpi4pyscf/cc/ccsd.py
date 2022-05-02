@@ -189,7 +189,7 @@ def update_amps(mycc, t1, t2, eris):
             time1 = log.timer_debug1('vvvo [%d:%d]'%(p0, p1), *time1)
 
     wVOov = numpy.vstack(wVOov)
-    wVOov = mpi.alltoall([wVOov[:,q0:q1] for q0,q1 in vlocs], split_recvbuf=True)
+    wVOov = mpi.alltoall_new([wVOov[:,q0:q1] for q0,q1 in vlocs], split_recvbuf=True)
     wVOov = numpy.vstack([x.reshape(-1,nvir_seg,nocc,nocc) for x in wVOov])
     fswap['wVOov'] = wVOov.transpose(1,2,3,0)
     wVooV = None
@@ -317,8 +317,8 @@ def update_amps(mycc, t1, t2, eris):
     t1Tnew -= numpy.einsum('aj,ji->ai', t1T, foo)
     t1Tnew /= eia.T
 
-    t2tmp = mpi.alltoall([t2Tnew[:,p0:p1] for p0,p1 in vlocs],
-                         split_recvbuf=True)
+    t2tmp = mpi.alltoall_new([t2Tnew[:,p0:p1] for p0,p1 in vlocs],
+                             split_recvbuf=True)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = t2tmp[task_id].reshape(p1-p0,nvir_seg,nocc,nocc)
         t2Tnew[:,p0:p1] += tmp.transpose(1,0,3,2)
@@ -647,7 +647,7 @@ def vector_to_amplitudes(vector, nmo, nocc):
 
     t2T = lib.unpack_tril(t2tril.reshape(nvir_seg*nvir,nocc2), filltriu=lib.PLAIN)
     t2T = t2T.reshape(nvir_seg,nvir,nocc,nocc)
-    t2tmp = mpi.alltoall([t2tril[:,p0:p1] for p0,p1 in vlocs], split_recvbuf=True)
+    t2tmp = mpi.alltoall_new([t2tril[:,p0:p1] for p0,p1 in vlocs], split_recvbuf=True)
     idx,idy = numpy.tril_indices(nocc)
     for task_id, (p0, p1) in enumerate(vlocs):
         tmp = t2tmp[task_id].reshape(p1-p0,nvir_seg,nocc2)
@@ -733,10 +733,10 @@ def distribute_amplitudes_(mycc, t1=None, t2=None):
         for task_id in range(mpi.pool.size):
             loc0, loc1 = _task_location(nvir, task_id)
             t2_all.append(t2T[loc0:loc1])
-        t2T = mpi.scatter(t2_all)
+        t2T = mpi.scatter_new(t2_all)
         mpi.bcast(t1)
     else:
-        t2T = mpi.scatter(None)
+        t2T = mpi.scatter_new(None)
         t1 = mpi.bcast(None)
     mycc.t1 = t1
     mycc.t2 = t2T.transpose(2,3,0,1)
@@ -750,7 +750,7 @@ def gather_amplitudes(mycc, t1=None, t2=None):
         t1 = mycc.t1
     if t2 is None:
         t2 = mycc.t2
-    t2 = mpi.gather(t2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
+    t2 = mpi.gather_new(t2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
     return t1, t2
 
 @mpi.parallel_call
@@ -761,7 +761,7 @@ def gather_lambda(mycc, l1=None, l2=None):
         l1 = mycc.l1
     if l2 is None:
         l2 = mycc.l2
-    l2 = mpi.gather(l2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
+    l2 = mpi.gather_new(l2.transpose(2, 3, 0, 1)).transpose(2, 3, 0, 1)
     return l1, l2
 
 def _diff_norm(mycc, t1new, t2new, t1, t2):
@@ -968,7 +968,7 @@ def _make_eris_outcore(mycc, mo_coeff=None):
 
         cput2 = logger.process_clock(), logger.perf_counter()
         ovvv_segs = [eri[:,:,nocc+q0:nocc+q1,nocc:].transpose(2,3,0,1) for q0,q1 in vlocs]
-        ovvv_segs = mpi.alltoall(ovvv_segs, split_recvbuf=True)
+        ovvv_segs = mpi.alltoall_new(ovvv_segs, split_recvbuf=True)
         cput2 = log.timer_debug1('vvvo alltoall', *cput2)
         for task_id, (q0, q1) in enumerate(comm.allgather((p0,p1))):
             ip0 = q0 + vlocs[task_id][0]

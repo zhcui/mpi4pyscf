@@ -85,7 +85,7 @@ def update_amps(mycc, t1, t2, eris):
     #t1Tnew  = np.dot(Fvv, t1T)
     #t1Tnew -= np.dot(t1T, Foo)
 
-    tmp  = np.einsum('aeim, me -> ai', t2T, Fov, optimize=True)
+    tmp  = einsum('aeim, me -> ai', t2T, Fov)
     #tmp -= np.einsum('fn, naif -> ai', t1T, eris.oxov, optimize=True)
     tmp  = mpi.allgather(tmp)
 
