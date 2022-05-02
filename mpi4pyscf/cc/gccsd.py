@@ -1216,9 +1216,10 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
         tmp = None
         eri_sliced = [vvoo[p0:p1] for (p0, p1) in vlocs]
     else:
+        vvoo = None
         eri_sliced = None
+    eris.xvoo = mpi.scatter_new(eri_sliced, root=0, data=vvoo)
     vvoo = None
-    eris.xvoo = mpi.scatter_new(eri_sliced, root=0)
     eri_sliced = None
     cput7 = log.timer('CCSD scatter xvoo:              ', *cput6)
 
@@ -1229,9 +1230,10 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
         tmp = None
         eri_sliced = [vvvv[p0:p1] for (p0, p1) in vlocs]
     else:
+        vvvv = None
         eri_sliced = None
+    eris.xvvv = mpi.scatter_new(eri_sliced, root=0, data=vvvv)
     vvvv = None
-    eris.xvvv = mpi.scatter_new(eri_sliced, root=0)
     eri_sliced = None
     cput8 = log.timer('CCSD scatter xvvv:              ', *cput7)
     mycc._eris = eris
