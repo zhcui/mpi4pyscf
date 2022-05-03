@@ -26,6 +26,7 @@ Usage: mpirun -np 2 python gccsd.py
 import os
 import time
 from functools import reduce
+from functools import partial
 import h5py
 import numpy as np
 import scipy.linalg as la
@@ -51,7 +52,6 @@ comm = mpi.comm
 rank = mpi.rank
 
 einsum = lib.einsum
-#from functools import partial
 #einsum = partial(np.einsum, optimize=True)
 #einsum_mv = partial(np.einsum, optimize=True)
 einsum_mv = lib.einsum 
@@ -1173,7 +1173,7 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     o = np.arange(0, nocc)
     v = np.arange(nocc, nmo)
     
-    # oooo
+    # 1. oooo
     if rank == 0:
         tmp = take_eri(eri, o, o, o, o)
         eris.oooo = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
@@ -1183,91 +1183,91 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
         eris.oooo = mpi.bcast(None)
     cput3 = log.timer('CCSD bcast   oooo:              ', *cput2)
     
-    # xooo
+    # 2. xooo
     if rank == 0:
         tmp = take_eri(eri, v, o, o, o)
-        vooo = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
-        tmp = None
-        eri_sliced = [vooo[p0:p1] for (p0, p1) in vlocs]
+        eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
-        vooo = None
+        tmp = None
         eri_sliced = None
-    eris.xooo = mpi.scatter_new(eri_sliced, root=0, data=vooo)
-    vooo = None
+    tmp = mpi.scatter_new(eri_sliced, root=0, data=tmp)
     eri_sliced = None
+    eris.xooo = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
+    tmp = None
     cput4 = log.timer('CCSD scatter xooo:              ', *cput3)
     
-    # xovo
+    # 3. xovo
     if rank == 0:
         tmp_vvoo = take_eri(eri, v, v, o, o)
         tmp_voov = take_eri(eri, v, o, o, v)
-        vovo = tmp_vvoo.transpose(0, 2, 1, 3) - tmp_voov.transpose(0, 2, 3, 1)
         # ZHC NOTE need to keep tmp_voov for xvoo
-        tmp_vvoo  = None
-        eri_sliced = [vovo[p0:p1] for (p0, p1) in vlocs]
+        eri_1 = [tmp_vvoo[p0:p1] for (p0, p1) in vlocs]
+        eri_2 = [tmp_voov[p0:p1] for (p0, p1) in vlocs]
     else:
-        vovo = None
-        eri_sliced = None
-    eris.xovo = mpi.scatter_new(eri_sliced, root=0, data=vovo)
-    vovo = None
-    eri_sliced = None
+        tmp_vvoo = None
+        tmp_voov = None
+        eri_1 = None
+        eri_2 = None
+
+    tmp_1 = mpi.scatter_new(eri_1, root=0, data=tmp_vvoo)
+    eri_1 = None
+    tmp_vvoo = None
+    
+    tmp_2 = mpi.scatter_new(eri_2, root=0, data=tmp_voov)
+    eri_2 = None
+    tmp_voov = None
+    
+    eris.xovo = tmp_1.transpose(0, 2, 1, 3) - tmp_2.transpose(0, 2, 3, 1)
+    tmp_1 = None
     cput5 = log.timer('CCSD scatter xovo:              ', *cput4)
     
-    # xvoo
-    if rank == 0:
-        # tmp: voov
-        # 0132 + 0213; 0132 + 0231
-        vvoo = tmp_voov.transpose(0, 3, 1, 2) - tmp_voov.transpose(0, 3, 2, 1)
-        tmp_voov = None
-        eri_sliced = [vvoo[p0:p1] for (p0, p1) in vlocs]
-    else:
-        vvoo = None
-        eri_sliced = None
-    eris.xvoo = mpi.scatter_new(eri_sliced, root=0, data=vvoo)
-    vvoo = None
-    eri_sliced = None
+    # 4. xvoo
+    eris.xvoo = tmp_2.transpose(0, 3, 1, 2) - tmp_2.transpose(0, 3, 2, 1)
+    tmp_2 = None
     cput6 = log.timer('CCSD scatter xvoo:              ', *cput5)
     
-    # xovv, xvvo
+    # 5. 6. xovv, xvvo
     if rank == 0:
         tmp = take_eri(eri, v, v, o, v)
-        vovv = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
-        eri_sliced = [vovv[p0:p1] for (p0, p1) in vlocs]
+        eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
-        vovv = None
-        eri_sliced = None
-    eris.xovv = mpi.scatter_new(eri_sliced, root=0, data=vovv)
-    vovv = None
-    eri_sliced = None
-    if rank == 0:
-        # tmp : vvov
-        vvvo = tmp.transpose(1, 3, 0, 2) - tmp.transpose(3, 1, 0, 2)
         tmp = None
-        eri_sliced = [vvvo[p0:p1] for (p0, p1) in vlocs]
-    else:
-        vvvo = None
         eri_sliced = None
-    eris.xvvo = mpi.scatter_new(eri_sliced, root=0, data=vvvo)
-    vvvo = None
+    tmp_1 = mpi.scatter_new(eri_sliced, root=0, data=tmp)
     eri_sliced = None
+    eris.xovv = tmp_1.transpose(0, 2, 1, 3) - tmp_1.transpose(0, 2, 3, 1)
+
+    if rank == 0:
+        tmp_2 = np.asarray(tmp.transpose(3, 2, 1, 0), order='C') # vovv
+        tmp = None
+        eri_sliced = [tmp_2[p0:p1] for (p0, p1) in vlocs]
+    else:
+        tmp_2 = None
+        tmp = None
+        eri_sliced = None
+    tmp_2 = mpi.scatter_new(eri_sliced, root=0, data=tmp_2)
+    eri_sliced = None
+    
+    eris.xvvo = tmp_1.transpose(0, 3, 1, 2) - tmp_2.transpose(0, 2, 3, 1)
+    tmp_1 = None
+    tmp_2 = None
     cput7 = log.timer('CCSD scatter xovv, xvvo:        ', *cput6)
 
-    # xvvv
+    # 7. xvvv
     if rank == 0:
         tmp = take_eri(eri, v, v, v, v)
-        vvvv = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
-        tmp = None
-        eri_sliced = [vvvv[p0:p1] for (p0, p1) in vlocs]
+        eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
-        vvvv = None
+        tmp = None
         eri_sliced = None
-    eris.xvvv = mpi.scatter_new(eri_sliced, root=0, data=vvvv)
-    vvvv = None
+    tmp = mpi.scatter_new(eri_sliced, root=0, data=tmp)
     eri_sliced = None
+    eris.xvvv = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
+    tmp = None
     cput8 = log.timer('CCSD scatter xvvv:              ', *cput7)
+    
     mycc._eris = eris
     log.timer('CCSD integral transformation   ', *cput0)
-
     return eris
 
 if __name__ == '__main__':
