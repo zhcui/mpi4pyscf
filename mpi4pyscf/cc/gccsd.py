@@ -840,24 +840,26 @@ class GCCSD(gccsd.GCCSD):
     # Initialization
     # ************************************************************************
 
-    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None, 
+                 remove_h2=False):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         regs = mpi.pool.apply(_init_ccsd, (self,), (None,))
         self._reg_procs = regs
+        self.remove_h2 = remove_h2
 
     def pack(self):
-        return {'verbose'   : self.verbose,
-                'max_memory': self.max_memory,
-                'frozen'    : self.frozen,
-                'mo_coeff'  : self.mo_coeff,
-                'mo_occ'    : self.mo_occ,
-                '_nocc'     : self._nocc,
-                '_nmo'      : self._nmo,
-                'diis_file' : self.diis_file,
+        return {'verbose'    : self.verbose,
+                'max_memory' : self.max_memory,
+                'frozen'     : self.frozen,
+                'mo_coeff'   : self.mo_coeff,
+                'mo_occ'     : self.mo_occ,
+                '_nocc'      : self._nocc,
+                '_nmo'       : self._nmo,
+                'diis_file'  : self.diis_file,
                 'level_shift': self.level_shift,
-                'direct'    : self.direct,
-                'diis_space': self.diis_space}
+                'direct'     : self.direct,
+                'diis_space' : self.diis_space}
 
     def unpack_(self, ccdic):
         self.__dict__.update(ccdic)
@@ -1343,6 +1345,9 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     # 7. xvvv
     if rank == 0:
         tmp = fn(eri, v, v, v, v)
+        if mycc.remove_h2:
+            eri = None
+            mycc._scf._eri = None
         eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
         tmp = None
