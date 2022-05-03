@@ -15,6 +15,7 @@
 #
 # Author: Zhi-Hao Cui <zhcui0408@gmail.com>
 #         Qiming Sun <osirpt.sun@gmail.com>
+#         Huanchen Zhai <hczhai@caltech.edu>
 #
 
 """
@@ -41,8 +42,7 @@ from pyscf import __config__
 from mpi4pyscf.lib import logger
 from mpi4pyscf.tools import mpi
 from mpi4pyscf.cc.ccsd import (kernel, _task_location, _sync_,
-                               _pack_scf, _diff_norm, _rotate_vir_block,
-                               amplitudes_to_vector, vector_to_amplitudes,
+                               _pack_scf, _rotate_vir_block,
                                distribute_amplitudes_, gather_amplitudes,
                                gather_lambda, restore_from_diis_)
 from mpi4pyscf.cc import gccsd_lambda
@@ -53,8 +53,8 @@ rank = mpi.rank
 
 einsum = lib.einsum
 #einsum = partial(np.einsum, optimize=True)
-#einsum_mv = partial(np.einsum, optimize=True)
 einsum_mv = lib.einsum 
+#einsum_mv = partial(np.einsum, optimize=True)
 
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
@@ -97,13 +97,10 @@ def update_amps(mycc, t1, t2, eris):
     t1Tnew -= np.dot(t1T, Foo)
 
     tmp  = einsum_mv('aeim, me -> ai', t2T, Fov)
-    #tmp -= einsum_mv('fn, naif -> ai', t1T, eris.oxov)
     tmp -= einsum_mv('fn, anfi -> ai', t1T, eris.xovo)
     tmp  = mpi.allgather(tmp)
     
-    #tmp2  = einsum('eamn, mnie -> ai', t2T, eris.ooox)
     tmp2  = einsum('eamn, einm -> ai', t2T, eris.xooo)
-    #tmp2 += einsum('efim, mafe -> ai', t2T, eris.ovvx)
     tmp2 += einsum('efim, efam -> ai', t2T, eris.xvvo)
     tmp2 *= 0.5
     tmp2  = mpi.allreduce(tmp2)
@@ -143,7 +140,6 @@ def update_amps(mycc, t1, t2, eris):
     Wvvvv = None
     tauT = None
 
-    #tmp = einsum('mbje, ei -> bmij', eris.oxov, t1T) # [b]mij
     tmp = einsum('bmej, ei -> bmij', eris.xovo, t1T) # [b]mij
     tmp = mpi.allgather_new(tmp) # bmij
     tmp = einsum('am, bmij -> abij', t1T[vloc0:vloc1], tmp) # [a]bij
@@ -164,12 +160,10 @@ def update_amps(mycc, t1, t2, eris):
         tmp = None
     tmpT = None
 
-    #tmp = einsum('ei, jeba -> abij', t1T, eris.ovvx)
     tmp = einsum('ei, abej -> abij', t1T, eris.xvvo)
     t2Tnew += tmp
     t2Tnew -= tmp.transpose(0, 1, 3, 2)
 
-    #tmp = einsum('am, ijmb -> baij', t1T, eris.ooox.conj())
     tmp = einsum('am, bmji -> baij', t1T, eris.xooo)
     t2Tnew += tmp
     tmpT = mpi.alltoall_new([tmp[:, p0:p1] for p0, p1 in vlocs],
@@ -249,7 +243,6 @@ def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     Fae = mpi.allreduce(Fae)
     tauT_tilde = None
     
-    #Fea += einsum_mv('mafe, fm -> ea', eris.ovvx, t1T)
     Fea += einsum_mv('efam, fm -> ea', eris.xvvo, t1T)
     Fae += mpi.allgather(Fea).T
     return Fae
@@ -265,7 +258,6 @@ def cc_Foo(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     
     Fmi  = 0.5 * einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
     tauT_tilde = None
-    #Fmi += einsum_mv('mnie, en -> mi', eris.ooox, t1T[vloc0:vloc1])
     Fmi += einsum_mv('einm, en -> mi', eris.xooo, t1T[vloc0:vloc1])
     Fmi  = mpi.allreduce(Fmi)
 
@@ -287,7 +279,6 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
 
     Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
     tauT = None
-    #tmp = einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
     tmp = einsum('einm, ej -> mnij', eris.xooo, t1T[vloc0:vloc1])
     Wmnij += tmp
     Wmnij -= tmp.transpose(0, 1, 3, 2)
@@ -320,7 +311,6 @@ def cc_Wvvvv(t1T, t2T, eris, tauT=None, vlocs=None):
     tauT = None
 
     Wabef += np.asarray(eris.xvvv)
-    #tmp = einsum('bm, mafe -> abfe', t1T, eris.oxvv)
     tmp = einsum('bm, amef -> abfe', t1T, eris.xovv)
     Wabef += tmp
 
@@ -345,16 +335,13 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
     Wmbej = einsum('efmn, fj -> mnej', eris.xvoo, -t1T)
     Wmbej = einsum('mnej, bn -> mbej', Wmbej, t1T)
     
-    #Wmbej -= einsum('mbfe, fj -> mbej', eris.ovvx, t1T)
     Wmbej -= einsum('efbm, fj -> mbej', eris.xvvo, t1T)
-    #Wmbej += einsum('bn, mnje -> mbej', t1T, eris.ooox)
     Wmbej += einsum('bn, ejnm -> mbej', t1T, eris.xooo)
 
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
         Wmbej -= 0.5 * einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
         t2T_tmp = None
 
-    #Wmbej -= np.asarray(eris.oxov).transpose(2, 3, 1, 0)
     Wmbej -= np.asarray(eris.xovo).transpose(3, 2, 0, 1)
     return Wmbej
 
@@ -623,6 +610,97 @@ def test_update_lambda(mycc, ref):
             print ("l2 diff: ", la.norm(l2new - ref[1]))
             #assert la.norm(l2new - ref[1]) < 1e-10
 
+def get_vtril(nvir, vloc, p0=None, p1=None):
+    idx_tril = np.tril_indices(nvir, k=-1)
+    start = np.searchsorted(idx_tril[0], vloc[0], side='left')
+    end   = np.searchsorted(idx_tril[0], vloc[1] - 1, side='right')
+    vtril = [idx_tril[0][start:end] - vloc[0], idx_tril[1][start:end]]
+    if (p0 is not None) and (p1 is not None):
+        vtril_new = [[], []]
+        for (ix, iy) in zip(*vtril):
+            if iy >= p0 and iy < p1:
+                vtril_new[0].append(ix)
+                vtril_new[1].append(iy)
+        vtril_new[0] = np.asarray(vtril_new[0])
+        vtril_new[1] = np.asarray(vtril_new[1])
+        vtril = vtril_new
+    vtril = tuple(vtril)
+    return vtril
+
+def amplitudes_to_vector(t1, t2, out=None):
+    """
+    amps to vector, with the same bahavior as pyscf gccsd.
+    """
+    t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
+    nvir_seg, nvir, nocc = t2T.shape[:3]
+    
+    ntasks = mpi.pool.size
+    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    vtril = get_vtril(nvir, vlocs[rank])
+    otril = np.tril_indices(nocc, k=-1)
+    nvir2 = len(vtril[0])
+    nocc2 = nocc * (nocc - 1) // 2
+    size = nvir2 * nocc2
+    nov = nocc * nvir
+    if rank == 0:
+        size += nov
+    
+    if rank == 0:
+        t1T = t1.T
+        vector = np.ndarray(size, t1.dtype, buffer=out)
+        vector[:nov] = t1T.ravel()
+        lib.take_2d(t2T.reshape(-1, nocc**2), vtril[0]*nvir+vtril[1],
+                    otril[0]*nocc+otril[1], out=vector[nov:])
+    else:
+        vector = np.ndarray(size, t1.dtype, buffer=out)
+        lib.take_2d(t2T.reshape(-1, nocc**2), vtril[0]*nvir+vtril[1],
+                    otril[0]*nocc+otril[1], out=vector) 
+    return vector
+
+def vector_to_amplitudes(vector, nmo, nocc):
+    """
+    vector to amps, with the same bahavior as pyscf gccsd.
+    """
+    nvir = nmo - nocc
+    nov = nocc * nvir
+    nocc2 = nocc * (nocc - 1) // 2
+    otril = np.tril_indices(nocc, k=-1)
+    
+    vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
+    vloc0, vloc1 = vlocs[rank]
+    nvir_seg = vloc1 - vloc0
+    vtril = get_vtril(nvir, vlocs[rank])
+    nvir2 = len(vtril[0])
+
+    if rank == 0:
+        t1T = vector[:nov].copy().reshape(nvir, nocc)
+        mpi.bcast(t1T)
+        t2tril = vector[nov:].reshape(nvir2, nocc2)
+    else:
+        t1T = mpi.bcast(None)
+        t2tril = vector.reshape(nvir2, nocc2)
+    t2T = np.zeros((nvir_seg * nvir, nocc**2), dtype=t2tril.dtype)
+    lib.takebak_2d(t2T, t2tril, vtril[0]*nvir+vtril[1], otril[0]*nocc+otril[1])
+    # anti-symmetry when exchanging two particle indices
+    lib.takebak_2d(t2T, -t2tril, vtril[0]*nvir+vtril[1], otril[1]*nocc+otril[0])
+    t2T = t2T.reshape(nvir_seg, nvir, nocc, nocc)
+    
+    t2tmp = mpi.alltoall_new([t2T[:, p0:p1] for p0,p1 in vlocs], split_recvbuf=True)
+    for task_id, (p0, p1) in enumerate(vlocs):
+        if task_id < rank:
+            # do not need this part since it is already filled.
+            continue
+        elif task_id == rank:
+            # fill the trlu by -tril.
+            v_idx = get_vtril(nvir, vlocs[task_id], p0=p0, p1=p1)
+            tmp = t2tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
+            t2T[v_idx[1]-p0, v_idx[0]+p0] = tmp[v_idx[0], v_idx[1]-p0].transpose(0, 2, 1)
+        else:
+            tmp = t2tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
+            t2T[:, p0:p1] = tmp.transpose(1, 0, 3, 2)
+
+    return t1T.T, t2T.transpose(2, 3, 0, 1)
+
 @mpi.parallel_call
 def save_amps(mycc, fname="fcc"):
     """
@@ -865,12 +943,19 @@ class GCCSD(gccsd.GCCSD):
     
     load_amps = load_amps
     
-
     def vector_size(self, nmo=None, nocc=None):
         if nocc is None: nocc = self.nocc
         if nmo is None: nmo = self.nmo
         nvir = nmo - nocc
-        return nocc * nvir + nocc*(nocc-1)//2*nvir*(nvir-1)//2
+        ntasks = mpi.pool.size
+        vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+        vtril = get_vtril(nvir, vlocs[rank])
+        nvir2 = len(vtril[0])
+        nocc2 = nocc * (nocc - 1) // 2
+        size = nvir2 * nocc2
+        if rank == 0:
+            size += nocc * nvir
+        return size
 
     # ************************************************************************
     # Lambda, rdm, ip ea
@@ -1100,9 +1185,6 @@ def _make_eris_incore(mycc, mo_coeff=None, ao2mofn=None):
             pseg = p1 - p0
             if pseg > 0:
                 eris.oooo[p0:p1] = eri_phys[:pseg, :nocc, :nocc, :nocc]
-                #eris.ooox[p0:p1] = eri_phys[:pseg, :nocc, :nocc, nocc+vloc0:nocc+vloc1]
-                #eris.oxov[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, :nocc, nocc:]
-                #eris.oxvv[p0:p1] = eri_phys[:pseg, nocc+vloc0:nocc+vloc1, nocc:, nocc:]
         
         if r in v_files:
             p00, p10 = plocs[r]
@@ -1130,7 +1212,6 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     """
     Make physist eri with incore ao2mo, for GGHF.
     """
-    from libdmet.utils import take_eri
     cput0 = (logger.process_clock(), logger.perf_counter())
     log = logger.Logger(mycc.stdout, mycc.verbose)
     _sync_(mycc)
@@ -1150,32 +1231,38 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
     vloc0, vloc1 = vlocs[rank]
     vseg = vloc1 - vloc0
-    cput1 = log.timer('CCSD ao2mo initialization:     ', *cput0)
     
     if rank == 0:
         if callable(ao2mofn):
             raise NotImplementedError
         else:
             assert eris.mo_coeff.dtype == np.double
+            eri = mycc._scf._eri
             if (nao == nmo) and (la.norm(eris.mo_coeff - np.eye(nmo)) < 1e-12):
                 # ZHC NOTE special treatment for OO-CCD,
                 # where the ao2mo is not needed for identity mo_coeff.
-                eri = mycc._scf._eri
+                from libdmet.utils import take_eri as fn
+                o = np.arange(0, nocc)
+                v = np.arange(nocc, nmo)
             else:
-                eri = ao2mo.kernel(mycc._scf._eri, eris.mo_coeff)
-            if eri.size == nmo**4:
-                eri = ao2mo.restore(8, eri, nmo)
+                def fn(x, mo0, mo1, mo2, mo3):
+                    return ao2mo.general(x, (mo0, mo1, mo2, mo3),
+                                         compact=False).reshape(mo0.shape[-1], mo1.shape[-1],
+                                                                mo2.shape[-1], mo3.shape[-1])
+                o = eris.mo_coeff[:, :nocc]
+                v = eris.mo_coeff[:, nocc:]
+
+            if eri.size == nao**4:
+                eri = ao2mo.restore(8, eri, nao)
                 
     comm.Barrier()
-    cput2 = log.timer('CCSD ao2mo:                     ', *cput1)
+    cput2 = log.timer('CCSD ao2mo initialization:     ', *cput0)
     
     # chunck and scatter:
-    o = np.arange(0, nocc)
-    v = np.arange(nocc, nmo)
     
     # 1. oooo
     if rank == 0:
-        tmp = take_eri(eri, o, o, o, o)
+        tmp = fn(eri, o, o, o, o)
         eris.oooo = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
         tmp = None
         mpi.bcast(eris.oooo)
@@ -1185,7 +1272,7 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     
     # 2. xooo
     if rank == 0:
-        tmp = take_eri(eri, v, o, o, o)
+        tmp = fn(eri, v, o, o, o)
         eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
         tmp = None
@@ -1198,8 +1285,8 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     
     # 3. xovo
     if rank == 0:
-        tmp_vvoo = take_eri(eri, v, v, o, o)
-        tmp_voov = take_eri(eri, v, o, o, v)
+        tmp_vvoo = fn(eri, v, v, o, o)
+        tmp_voov = fn(eri, v, o, o, v)
         # ZHC NOTE need to keep tmp_voov for xvoo
         eri_1 = [tmp_vvoo[p0:p1] for (p0, p1) in vlocs]
         eri_2 = [tmp_voov[p0:p1] for (p0, p1) in vlocs]
@@ -1228,7 +1315,7 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     
     # 5. 6. xovv, xvvo
     if rank == 0:
-        tmp = take_eri(eri, v, v, o, v)
+        tmp = fn(eri, v, v, o, v)
         eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
         tmp = None
@@ -1255,7 +1342,7 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
 
     # 7. xvvv
     if rank == 0:
-        tmp = take_eri(eri, v, v, v, v)
+        tmp = fn(eri, v, v, v, v)
         eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
         tmp = None
