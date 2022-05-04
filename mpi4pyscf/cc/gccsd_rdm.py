@@ -267,7 +267,7 @@ def make_rdm1(mycc, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
     return gccsd_rdm._make_rdm1(mycc, d1, with_frozen=True, ao_repr=ao_repr)
 
 @mpi.parallel_call
-def make_rdm2(mycc, t1, t2, l1, l2, ao_repr=False):
+def make_rdm2(mycc, t1, t2, l1, l2, ao_repr=False, with_dm1=True):
     r'''
     Two-particle density matrix in the molecular spin-orbital representation
 
@@ -297,7 +297,7 @@ def make_rdm2(mycc, t1, t2, l1, l2, ao_repr=False):
 
     if rank == 0:
         d2 = gccsd_rdm._gamma2_intermediates(mycc, t1, t2, l1, l2)
-        rdm2 = gccsd_rdm._make_rdm2(mycc, d1, d2, with_dm1=True, with_frozen=True,
+        rdm2 = gccsd_rdm._make_rdm2(mycc, d1, d2, with_dm1=with_dm1, with_frozen=True,
                                     ao_repr=ao_repr)
     else:
         rdm2 = None

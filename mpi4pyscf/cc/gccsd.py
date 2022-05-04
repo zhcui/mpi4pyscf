@@ -707,6 +707,8 @@ def save_amps(mycc, fname="fcc"):
     Save amplitudes to a file.
     """
     _sync_(mycc)
+    if fname.endswith(".h5"):
+        fname = fname[:-3]
     filename = fname + '__rank' + str(mpi.rank) + ".h5"
     fcc = lib.H5TmpFile(filename, 'w')
     fcc['mo_coeff'] = mycc.mo_coeff
@@ -727,6 +729,8 @@ def load_amps(mycc, fname="fcc"):
     Load amplitudes from a file.
     """
     _sync_(mycc)
+    if fname.endswith(".h5"):
+        fname = fname[:-3]
     filename = fname + '__rank' + str(mpi.rank) + ".h5"
     fcc = h5py.File(filename, 'r')
     keys = fcc.keys()
@@ -761,6 +765,8 @@ def restore_from_h5(mycc, fname="fcc", umat=None):
         mycc: CC object, with t1, t2, l1, l2 updated.
     """
     _sync_(mycc)
+    if fname.endswith(".h5"):
+        fname = fname[:-3]
     logger.info(mycc, "restore amps from h5 ...")
     filename = fname + '__rank' + str(rank) + ".h5"
     if all(comm.allgather(os.path.isfile(filename))):
@@ -844,9 +850,9 @@ class GCCSD(gccsd.GCCSD):
                  remove_h2=False):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
+        self.remove_h2 = remove_h2
         regs = mpi.pool.apply(_init_ccsd, (self,), (None,))
         self._reg_procs = regs
-        self.remove_h2 = remove_h2
 
     def pack(self):
         return {'verbose'    : self.verbose,
@@ -1070,9 +1076,12 @@ class GGCCSD(GCCSD):
     """
     MPI GGCCSD.
     """
-    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
+                 remove_h2=False, save_mem=False):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
+        self.remove_h2 = remove_h2
+        self.save_mem = save_mem
         regs = mpi.pool.apply(_init_ggccsd, (self,), (None,))
         self._reg_procs = regs
 
@@ -1246,17 +1255,29 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
                 from libdmet.utils import take_eri as fn
                 o = np.arange(0, nocc)
                 v = np.arange(nocc, nmo)
+                if eri.size == nmo**4:
+                    eri = ao2mo.restore(8, eri, nmo)
             else:
-                def fn(x, mo0, mo1, mo2, mo3):
-                    return ao2mo.general(x, (mo0, mo1, mo2, mo3),
-                                         compact=False).reshape(mo0.shape[-1], mo1.shape[-1],
-                                                                mo2.shape[-1], mo3.shape[-1])
-                o = eris.mo_coeff[:, :nocc]
-                v = eris.mo_coeff[:, nocc:]
+                if mycc.save_mem:
+                    # ZHC NOTE the following is slower, although may save some memory.
+                    def fn(x, mo0, mo1, mo2, mo3):
+                        return ao2mo.general(x, (mo0, mo1, mo2, mo3),
+                                             compact=False).reshape(mo0.shape[-1], mo1.shape[-1],
+                                                                    mo2.shape[-1], mo3.shape[-1])
+                    o = eris.mo_coeff[:, :nocc]
+                    v = eris.mo_coeff[:, nocc:]
+                    if eri.size == nao**4:
+                        eri = ao2mo.restore(8, eri, nao)
+                else:
+                    from libdmet.utils import take_eri as fn
+                    o = np.arange(0, nocc)
+                    v = np.arange(nocc, nmo)
+                    if mycc.remove_h2:
+                        mycc._scf._eri = None
+                    eri = ao2mo.kernel(eri, eris.mo_coeff)
+                    if eri.size == nmo**4:
+                        eri = ao2mo.restore(8, eri, nmo)
 
-            if eri.size == nao**4:
-                eri = ao2mo.restore(8, eri, nao)
-                
     comm.Barrier()
     cput2 = log.timer('CCSD ao2mo initialization:     ', *cput0)
     
@@ -1356,6 +1377,7 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
     eri_sliced = None
     eris.xvvv = tmp.transpose(0, 2, 1, 3) - tmp.transpose(0, 2, 3, 1)
     tmp = None
+    eri = None
     cput8 = log.timer('CCSD scatter xvvv:              ', *cput7)
     
     mycc._eris = eris
