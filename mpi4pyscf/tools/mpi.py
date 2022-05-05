@@ -258,6 +258,22 @@ def reduce(sendbuf, op=MPI.SUM, root=0):
     else:
         return sendbuf
 
+def reduce_inplace(sendbuf, op=MPI.SUM, root=0):
+    sendbuf = numpy.asarray(sendbuf, order='C')
+    shape, mpi_dtype = comm.bcast((sendbuf.shape, sendbuf.dtype.char))
+    _assert(sendbuf.shape == shape and sendbuf.dtype.char == mpi_dtype)
+    dtype = sendbuf.dtype.char
+    send_seg = numpy.ndarray(sendbuf.size, dtype=sendbuf.dtype, buffer=sendbuf)
+    for p0, p1 in lib.prange(0, sendbuf.size, BLKSIZE):
+        if rank == root:
+            comm.Reduce(MPI.IN_PLACE,
+                        [send_seg[p0:p1], dtype],
+                        op, root)
+        else:
+            comm.Reduce([send_seg[p0:p1], dtype],
+                        None, op, root)
+    return sendbuf
+
 def allreduce(sendbuf, op=MPI.SUM):
     sendbuf = numpy.asarray(sendbuf, order='C')
     shape, mpi_dtype = comm.bcast((sendbuf.shape, sendbuf.dtype.char))
