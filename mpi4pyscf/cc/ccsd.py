@@ -831,6 +831,18 @@ def _init_ccsd(ccsd_obj):
     regs = mpi.comm.gather(key)
     return regs
 
+@mpi.parallel_call
+def _release_regs(mycc, remove_h2=False):
+    pairs = list(mpi._registry.items())
+    for key, val in pairs:
+        if isinstance(val, CCSD):
+            if remove_h2:
+                mpi._registry[key]._scf = None
+            else:
+                del mpi._registry[key]
+    if not remove_h2:
+        mycc._reg_procs = []
+
 class CCSD(ccsd.CCSD):
     def __init__(self, mf, frozen=0, mo_coeff=None, mo_occ=None):
         ccsd.CCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
@@ -884,6 +896,17 @@ class CCSD(ccsd.CCSD):
         if rank == 0:
             self._finalize()
         return self.e_corr, self.t1, self.t2
+    
+    def _finalize(self):
+        """
+        Hook for dumping results and clearing up the object.
+        """
+        ccsd.CCSD._finalize(self)
+        # ZHC NOTE unregister the ccsd_obj
+        #self._release_regs()
+        return self
+
+    _release_regs = _release_regs
 
     def ao2mo(self, mo_coeff=None):
         _make_eris_outcore(self, mo_coeff)

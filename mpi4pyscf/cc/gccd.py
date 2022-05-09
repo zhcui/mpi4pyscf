@@ -27,6 +27,7 @@ import scipy.linalg as la
 
 from pyscf import lib
 from pyscf import scf
+from pyscf.cc import ccsd as rccsd
 from pyscf.cc import gccsd
 from pyscf import __config__
 
@@ -425,6 +426,18 @@ def _init_gccd(ccd_obj):
     regs = mpi.comm.gather(key)
     return regs
 
+@mpi.parallel_call
+def _release_regs(mycc, remove_h2=False):
+    pairs = list(mpi._registry.items())
+    for key, val in pairs:
+        if isinstance(val, (GCCD, GGCCD)):
+            if remove_h2:
+                mpi._registry[key]._scf = None
+            else:
+                del mpi._registry[key]
+    if not remove_h2:
+        mycc._reg_procs = []
+
 class GCCD(mpigccsd.GCCSD):
     """
     MPI GCCD.
@@ -433,9 +446,11 @@ class GCCD(mpigccsd.GCCSD):
     # Initialization
     # ************************************************************************
 
-    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
+                 remove_h2=False):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
+        self.remove_h2 = remove_h2
         regs = mpi.pool.apply(_init_gccd, (self,), (None,))
         self._reg_procs = regs
         
@@ -470,6 +485,17 @@ class GCCD(mpigccsd.GCCSD):
 
     def kernel(self, t1=None, t2=None, eris=None):
         return self.ccd(t1, t2, eris)
+    
+    def _finalize(self):
+        """
+        Hook for dumping results and clearing up the object.
+        """
+        rccsd.CCSD._finalize(self)
+        # ZHC NOTE unregister the ccsd_obj
+        #self._release_regs()
+        return self
+
+    _release_regs = _release_regs
 
     # ************************************************************************
     # Lambda, rdm, ip ea
@@ -523,7 +549,7 @@ def _init_ggccd(ccd_obj):
         mol, cc_attr = mpi.comm.bcast(None)
         ccd_obj.mol = gto.mole.loads(mol)
         ccd_obj.unpack_(cc_attr)
-    if True:  # If also to initialize cc._scf object
+    if False:  # If also to initialize cc._scf object
         if mpi.rank == 0:
             if hasattr(ccd_obj._scf, '_scf'):
                 # ZHC FIXME a hack, newton need special treatment to broadcast
@@ -545,9 +571,12 @@ class GGCCD(GCCD):
     """
     MPI GGCCD.
     """
-    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
+                 remove_h2=False, save_mem=False):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
+        self.remove_h2 = remove_h2
+        self.save_mem = save_mem
         regs = mpi.pool.apply(_init_ggccd, (self,), (None,))
         self._reg_procs = regs
 

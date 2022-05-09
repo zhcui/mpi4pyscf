@@ -36,6 +36,7 @@ from pyscf import lib
 from pyscf import ao2mo
 from pyscf.ao2mo import _ao2mo
 from pyscf import scf
+from pyscf.cc import ccsd as rccsd
 from pyscf.cc import gccsd
 from pyscf import __config__
 
@@ -72,6 +73,7 @@ def update_amps(mycc, t1, t2, eris):
     nvir_seg, nvir, nocc = t2T.shape[:3]
     t1 = t2 = None
     ntasks = mpi.pool.size
+    
     vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     vloc0, vloc1 = vlocs[rank]
     log.debug2('vlocs %s', vlocs)
@@ -835,6 +837,18 @@ def transform_t2_to_bo(t2, u, vlocs=None):
 
 transform_l2_to_bo = transform_t2_to_bo
 
+@mpi.parallel_call
+def _release_regs(mycc, remove_h2=False):
+    pairs = list(mpi._registry.items())
+    for key, val in pairs:
+        if isinstance(val, (GCCSD, GGCCSD)):
+            if remove_h2:
+                mpi._registry[key]._scf = None
+            else:
+                del mpi._registry[key]
+    if not remove_h2:
+        mycc._reg_procs = []
+
 class GCCSD(gccsd.GCCSD):
     """
     MPI GCCSD.
@@ -917,6 +931,17 @@ class GCCSD(gccsd.GCCSD):
 
     def kernel(self, t1=None, t2=None, eris=None):
         return self.ccsd(t1, t2, eris)
+    
+    def _finalize(self):
+        """
+        Hook for dumping results and clearing up the object.
+        """
+        rccsd.CCSD._finalize(self)
+        # ZHC NOTE unregister the ccsd_obj
+        #self._release_regs()
+        return self
+
+    _release_regs = _release_regs
 
     def run_diis(self, t1, t2, istep, normt, de, adiis):
         if (adiis and
@@ -1053,7 +1078,7 @@ def _init_ggccsd(ccsd_obj):
         mol, cc_attr = mpi.comm.bcast(None)
         ccsd_obj.mol = gto.mole.loads(mol)
         ccsd_obj.unpack_(cc_attr)
-    if True:  # If also to initialize cc._scf object
+    if False:  # If also to initialize cc._scf object
         if mpi.rank == 0:
             if hasattr(ccsd_obj._scf, '_scf'):
                 # ZHC FIXME a hack, newton need special treatment to broadcast
@@ -1070,7 +1095,6 @@ def _init_ggccsd(ccsd_obj):
     mpi._registry[key] = ccsd_obj
     regs = mpi.comm.gather(key)
     return regs
-
 
 class GGCCSD(GCCSD):
     """
@@ -1274,6 +1298,7 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
                     v = np.arange(nocc, nmo)
                     if mycc.remove_h2:
                         mycc._scf._eri = None
+                        _release_regs(mycc, remove_h2=True)
                     eri = ao2mo.kernel(eri, eris.mo_coeff)
                     if eri.size == nmo**4:
                         eri = ao2mo.restore(8, eri, nmo)
@@ -1368,7 +1393,8 @@ def _make_eris_incore_ghf(mycc, mo_coeff=None, ao2mofn=None):
         tmp = fn(eri, v, v, v, v)
         if mycc.remove_h2:
             eri = None
-            mycc._scf._eri = None
+            if mycc._scf is not None:
+                mycc._scf._eri = None
         eri_sliced = [tmp[p0:p1] for (p0, p1) in vlocs]
     else:
         tmp = None
