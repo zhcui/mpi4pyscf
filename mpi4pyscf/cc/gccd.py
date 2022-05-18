@@ -121,13 +121,16 @@ def update_amps(mycc, t1, t2, eris):
     t2Tnew += np.asarray(eris.xvoo)
     tauT = make_tauT(t1T, t2T, vlocs=vlocs)
     Woooo = cc_Woooo(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
-    t2Tnew += einsum('abmn, mnij -> abij', tauT, Woooo * 0.5)
+    Woooo *= 0.5
+    t2Tnew += einsum('abmn, mnij -> abij', tauT, Woooo)
     Woooo = None
 
     Wvvvv = cc_Wvvvv(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
-        t2Tnew += 0.5 * einsum('abef, efij -> abij', Wvvvv[:, :, p0:p1], tauT_tmp)
-        tauT_tmp = None
+        tmp = einsum('abef, efij -> abij', Wvvvv[:, :, p0:p1], tauT_tmp)
+        tmp *= 0.5
+        t2Tnew += tmp
+        tmp = tauT_tmp = None
     Wvvvv = None
     tauT = None
 
@@ -257,7 +260,8 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
     if tauT is None:
         tauT = make_tauT(t1T, t2T, vlocs=vlocs)
 
-    Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
+    Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT)
+    Wmnij *= 0.25
     tauT = None
     #tmp = einsum('mnie, ej -> mnij', eris.ooox, t1T[vloc0:vloc1])
     #Wmnij += tmp

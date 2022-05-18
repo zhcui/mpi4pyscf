@@ -130,13 +130,16 @@ def update_amps(mycc, t1, t2, eris):
     t2Tnew += np.asarray(eris.xvoo)
     tauT = make_tauT(t1T, t2T, vlocs=vlocs)
     Woooo = cc_Woooo(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
-    t2Tnew += einsum('abmn, mnij -> abij', tauT, Woooo * 0.5)
+    Woooo *= 0.5
+    t2Tnew += einsum('abmn, mnij -> abij', tauT, Woooo)
     Woooo = None
 
     Wvvvv = cc_Wvvvv(t1T, t2T, eris, tauT=tauT, vlocs=vlocs)
     for task_id, tauT_tmp, p0, p1 in _rotate_vir_block(tauT, vlocs=vlocs):
-        t2Tnew += 0.5 * einsum('abef, efij -> abij', Wvvvv[:, :, p0:p1], tauT_tmp)
-        tauT_tmp = None
+        tmp = einsum('abef, efij -> abij', Wvvvv[:, :, p0:p1], tauT_tmp)
+        tmp *= 0.5
+        t2Tnew += tmp
+        tmp = tauT_tmp = None
     Wvvvv = None
     tauT = None
 
@@ -277,11 +280,13 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
     if tauT is None:
         tauT = make_tauT(t1T, t2T, vlocs=vlocs)
 
-    Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT) * 0.25
+    Wmnij = einsum('efmn, efij -> mnij', eris.xvoo, tauT)
+    Wmnij *= 0.25
     tauT = None
-    tmp = einsum('einm, ej -> mnij', eris.xooo, t1T[vloc0:vloc1])
-    Wmnij += tmp
-    Wmnij -= tmp.transpose(0, 1, 3, 2)
+    
+    tmp = einsum('eimn, ej -> mnij', eris.xooo, t1T[vloc0:vloc1])
+    Wmnij -= tmp
+    Wmnij += tmp.transpose(0, 1, 3, 2)
     tmp = None
     Wmnij  = mpi.allreduce(Wmnij)
     Wmnij += eris.oooo
@@ -339,8 +344,10 @@ def cc_Wovvo(t1T, t2T, eris, vlocs=None):
     Wmbej += einsum('bn, ejnm -> mbej', t1T, eris.xooo)
 
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
-        Wmbej -= 0.5 * einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
-        t2T_tmp = None
+        tmp = einsum('fbjn, efmn -> mbej', t2T_tmp, eris.xvoo[:, p0:p1])
+        tmp *= (-0.5)
+        Wmbej += tmp
+        tmp = t2T_tmp = None
 
     Wmbej -= np.asarray(eris.xovo).transpose(3, 2, 0, 1)
     return Wmbej
