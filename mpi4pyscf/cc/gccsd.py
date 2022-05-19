@@ -105,7 +105,7 @@ def update_amps(mycc, t1, t2, eris):
     tmp2  = einsum('eamn, einm -> ai', t2T, eris.xooo)
     tmp2 += einsum('efim, efam -> ai', t2T, eris.xvvo)
     tmp2 *= 0.5
-    tmp2  = mpi.allreduce(tmp2)
+    tmp2  = mpi.allreduce_inplace(tmp2)
     tmp  += tmp2
     tmp2  = None
 
@@ -245,7 +245,7 @@ def cc_Fvv(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     Fea = fvv - 0.5 * np.dot(fvo[vloc0:vloc1], t1T.T)
 
     Fae = (-0.5) * einsum('femn, famn -> ae', eris.xvoo, tauT_tilde)
-    Fae = mpi.allreduce(Fae)
+    Fae = mpi.allreduce_inplace(Fae)
     tauT_tilde = None
     
     Fea += einsum_mv('efam, fm -> ea', eris.xvvo, t1T)
@@ -264,7 +264,7 @@ def cc_Foo(t1T, t2T, eris, tauT_tilde=None, vlocs=None):
     Fmi  = 0.5 * einsum('efmn, efin -> mi', eris.xvoo, tauT_tilde)
     tauT_tilde = None
     Fmi += einsum_mv('einm, en -> mi', eris.xooo, t1T[vloc0:vloc1])
-    Fmi  = mpi.allreduce(Fmi)
+    Fmi  = mpi.allreduce_inplace(Fmi)
 
     fov = eris.fock[:nocc, nocc:]
     foo = eris.fock[:nocc, :nocc]
@@ -290,7 +290,7 @@ def cc_Woooo(t1T, t2T, eris, tauT=None, vlocs=None):
     Wmnij -= tmp
     Wmnij += tmp.transpose(0, 1, 3, 2)
     tmp = None
-    Wmnij  = mpi.allreduce(Wmnij)
+    Wmnij  = mpi.allreduce_inplace(Wmnij)
     Wmnij += eris.oooo
     return Wmnij
 
@@ -895,6 +895,8 @@ class GCCSD(gccsd.GCCSD):
     def dump_flags(self, verbose=None):
         if rank == 0:
             gccsd.GCCSD.dump_flags(self, verbose)
+            logger.info(self, 'level_shift = %.9g', self.level_shift)
+            logger.info(self, 'nproc       = %4d', mpi.pool.size)
         return self
 
     def sanity_check(self):

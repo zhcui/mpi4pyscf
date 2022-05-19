@@ -155,7 +155,7 @@ def make_intermediates(mycc, t1, t2, eris):
     #tmp  = einsum('kijb, bk -> ij', eris.ooox, t1T[vloc0:vloc1])
     tmp  = einsum('bcik, bcjk -> ij', eris.xvoo, tauT)
     tmp *= 0.5
-    v2  += mpi.allreduce(tmp)
+    v2  += mpi.allreduce_inplace(tmp)
     
     #v4 -= np.asarray(eris.oxov).transpose(0, 1, 3, 2)
     v4 -= np.asarray(eris.xovo).transpose(1, 0, 2, 3)
@@ -165,7 +165,7 @@ def make_intermediates(mycc, t1, t2, eris):
     #v5 += mpi.allreduce(np.einsum('ck, bk, cj -> bj', tmp, t1T, t1T[vloc0:vloc1], optimize=True))
     
     #v5 += mpi.allreduce(einsum('kljc, cbkl -> bj', eris.ooox, t2T)) * 0.5
-    v5 += mpi.allreduce(einsum('cjlk, cbkl -> bj', eris.xooo, t2T)) * 0.5
+    v5 += mpi.allreduce_inplace(einsum('cjlk, cbkl -> bj', eris.xooo, t2T) * 0.5)
     tmp = 0.0
     # ZHC NOTE FIXME it seems that the tmp does not contribute to rdm
     for task_id, t2T_tmp, p0, p1 in _rotate_vir_block(t2T, vlocs=vlocs):
@@ -185,7 +185,7 @@ def make_intermediates(mycc, t1, t2, eris):
     woooo  = einsum('cdij, cdkl -> ijkl', eris.xvoo, tauT)
     woooo *= 0.25
     #woooo += einsum('jilc, ck -> jilk', eris.ooox, t1T[vloc0:vloc1])
-    woooo  = mpi.allreduce(woooo)
+    woooo  = mpi.allreduce_inplace(woooo)
     woooo += np.asarray(eris.oooo) * 0.5
     imds.woooo[:] = woooo
     woooo = None
@@ -286,15 +286,15 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     v2 = imds.v2 - np.diag(mo_e_o)
 
     mba = einsum('cakl, cbkl -> ba', l2T, t2T) * 0.5
-    mba = mpi.allreduce(mba)
+    mba = mpi.allreduce_inplace(mba)
     mij = einsum('cdki, cdkj -> ij', l2T, t2T) * 0.5
-    mij = mpi.allreduce(mij)
+    mij = mpi.allreduce_inplace(mij)
     # m3 [a]bij
     m3  = einsum('abkl, ijkl -> abij', l2T, np.asarray(imds.woooo))
     
     tauT = t2T #+ np.einsum('ai, bj -> abij', t1T[vloc0:vloc1] * 2.0, t1T, optimize=True)
     tmp = einsum('cdij, cdkl -> ijkl', l2T, tauT)
-    tmp = mpi.allreduce(tmp)
+    tmp = mpi.allreduce_inplace(tmp)
     tauT = None
     
     vvoo = np.asarray(eris.xvoo)

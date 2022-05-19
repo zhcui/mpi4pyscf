@@ -37,13 +37,13 @@ def _gamma1_intermediates(mycc, t1, t2, l1, l2):
     t1 = t2 = l1 = l2 = None
 
     doo  = -np.dot(l1T.T, t1T)
-    doo -= mpi.allreduce(einsum('efim, efjm -> ij', l2T, t2T) * 0.5)
+    doo -= mpi.allreduce_inplace(einsum('efim, efjm -> ij', l2T, t2T) * 0.5)
 
     dvv  = np.dot(t1T, l1T.T)
-    dvv += mpi.allreduce(einsum('eamn, ebmn -> ab', t2T, l2T) * 0.5)
+    dvv += mpi.allreduce_inplace(einsum('eamn, ebmn -> ab', t2T, l2T) * 0.5)
 
-    xt1  = mpi.allreduce(einsum('efmn, efin -> mi', l2T, t2T) * 0.5)
-    xt2  = mpi.allreduce(einsum('famn, femn -> ae', t2T, l2T) * 0.5)
+    xt1  = mpi.allreduce_inplace(einsum('efmn, efin -> mi', l2T, t2T) * 0.5)
+    xt2  = mpi.allreduce_inplace(einsum('famn, femn -> ae', t2T, l2T) * 0.5)
     xt2 += np.dot(t1T, l1T.T)
 
     dvo  = mpi.allgather(np.einsum('aeim, em -> ai', t2T, l1T, optimize=True))
