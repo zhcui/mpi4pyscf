@@ -33,13 +33,15 @@ MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
 def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
            tolnormt=1e-6, verbose=None):
     log = logger.new_logger(mycc, verbose)
-    cput1 = cput0 = (logger.process_clock(), logger.perf_counter())
+    cput0 = (logger.process_clock(), logger.perf_counter())
     _sync_(mycc)
 
     eris = getattr(mycc, '_eris', None)
     if eris is None:
         mycc.ao2mo(mycc.mo_coeff)
         eris = mycc._eris
+    
+    cput1 = (logger.process_clock(), logger.perf_counter())
 
     # Use the existed amplitudes as initial guess
     if t1 is None: t1 = mycc.t1

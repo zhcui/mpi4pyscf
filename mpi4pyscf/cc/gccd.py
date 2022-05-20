@@ -52,9 +52,8 @@ def update_amps(mycc, t1, t2, eris):
     """
     Update GCCD amplitudes.
     """
-    time1 = time0 = logger.process_clock(), logger.perf_counter()
+    time0 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(mycc.stdout, mycc.verbose)
-    cpu1 = time0
 
     t1T = t1.T
     t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
