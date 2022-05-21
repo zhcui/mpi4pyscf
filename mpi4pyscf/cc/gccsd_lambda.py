@@ -85,7 +85,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
         adiis.space = mycc.diis_space
     else:
         adiis = None
-    cput0 = log.timer('CCSD lambda initialization', *cput0)
+    cput1 = log.timer('CCSD lambda initialization', *cput0)
 
     conv = False
     for istep in range(max_cycle):
@@ -95,7 +95,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
         l1new = l2new = None
         l1, l2 = mycc.run_diis(l1, l2, istep, normt, 0, adiis)
         log.info('cycle = %d  norm(lambda1,lambda2) = %.6g', istep+1, normt)
-        cput0 = log.timer('CCSD iter', *cput0)
+        cput1 = log.timer('CCSD iter', *cput1)
         if normt < tol:
             conv = True
             break
