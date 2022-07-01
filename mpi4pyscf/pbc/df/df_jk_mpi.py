@@ -42,6 +42,36 @@ def _task_location(n, task=rank):
     loc1 = div_points[task + 1]
     return loc0, loc1
 
+def assign_workload(kij_args, n): 
+    idx_1 = []
+    idx_2 = []
+    for i, args in enumerate(kij_args):
+        if args[2]:
+            idx_2.append(i)
+        else:
+            idx_1.append(i)
+    
+    idx_1 = np.asarray(idx_1)
+    idx_2 = np.asarray(idx_2)
+    n_1 = len(idx_1)
+    n_2 = len(idx_2)
+    nibz = n_1 + n_2 
+    
+    klocs = [_task_location(nibz, task_id) for task_id in range(n)]
+    ns = [j - i for i, j in klocs]
+
+    kids = [[] for i in range(n)]
+    # first assign 1
+    for i, idx in enumerate(idx_1):
+        kids[i%n].append(idx)
+
+    start = 0 
+    for i, kid in enumerate(kids):
+        end = start + (ns[i] - len(kid))
+        kid.extend(idx_2[start:end])
+        start = end 
+    return kids
+
 def get_naoaux(gdf):
     """
     The maximum dimension of auxiliary basis for every k-point.
@@ -307,9 +337,9 @@ def get_k_kpts(cell, cderi, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=No
             #t1 = log.timer_debug1('get_k_kpts: make_kpt (%d,*)'%ki, *t1)
 
     ntasks = mpi.pool.size
-    kij_locs = [_task_location(len(kij_args), task_id) for task_id in range(ntasks)]
-    loc = kij_locs[rank]
-    kij_args_own = kij_args[loc[0]:loc[1]]
+    kij_ids = assign_workload(kij_args, ntasks)
+    kij_id_own = kij_ids[rank]
+    kij_args_own = [kij_args[i] for i in kij_id_own]
     log.alldebug1("kij pairs: %s", kij_args_own)
 
     for args in kij_args_own:
