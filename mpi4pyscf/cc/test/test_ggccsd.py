@@ -140,6 +140,8 @@ mycc.conv_tol_normt = 1e-8
 mycc.max_cycle = 50
 mycc.kernel()
 
+l1_ref, l2_ref = mycc.solve_lambda()
+
 rdm1_ref = mycc.make_rdm1(ao_repr=True)
 rdm2_ref = mycc.make_rdm2(ao_repr=True)
 
@@ -181,6 +183,13 @@ assert abs(mycc.e_corr - -0.134698069373674) < 1e-8
 mycc.solve_lambda()
 
 print ("-" * 79)
+l1, l2 = mycc.gather_lambda()
+print ("l1 diff ", max_abs(l1 - l1_ref))
+print ("l2 diff ", max_abs(l2 - l2_ref))
+
+assert max_abs(l1 - l1_ref) < 1e-9
+assert max_abs(l2 - l2_ref) < 1e-9
+
 rdm1 = mycc.make_rdm1(ao_repr=True)
 
 print ("rdm1")
