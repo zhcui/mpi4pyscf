@@ -177,11 +177,29 @@ def update_amps(mycc, t1, t2, eris):
         t2Tnew[:, p0:p1] -= tmp.transpose(1, 0, 2, 3)
         tmp = None
     tmpT = None
-
-    eia = mo_e_o[:, None] - mo_e_v
-    t1Tnew /= eia.T
-    for i in range(vloc0, vloc1):
-        t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
+    
+    if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
+        # ZHC NOTE imagninary time evolution
+        if getattr(mycc, "ignore_level_shift", True):
+            mo_e_v = eris.mo_energy[nocc:]
+            eia = mo_e_o[:, None] - mo_e_v
+        else:
+            eia = mo_e_o[:, None] - mo_e_v
+        
+        dt = mycc.dt
+        t1Tnew *= (-dt)
+        t1Tnew += t1T * (1.0 + dt * eia.T)
+        
+        t2Tnew *= (-dt)
+        eia *= dt
+        for i in range(vloc0, vloc1):
+            ebij = lib.direct_sum('i + jb -> bij', eia[:, i] + 1, eia)
+            t2Tnew[i-vloc0] += t2T[i-vloc0] * ebij
+    else:
+        eia = mo_e_o[:, None] - mo_e_v
+        t1Tnew /= eia.T
+        for i in range(vloc0, vloc1):
+            t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
 
     time0 = log.timer_debug1('update t1 t2', *time0)
     return t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1)
@@ -1109,17 +1127,40 @@ class GGCCSD(GCCSD):
     MPI GGCCSD.
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
-                 remove_h2=False, save_mem=False):
+                 remove_h2=False, save_mem=False, dt=None, 
+                 ignore_level_shift=True):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
         self.save_mem = save_mem
+        self.dt = dt
+        self.ignore_level_shift = ignore_level_shift
+        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift"])
+
         regs = mpi.pool.apply(_init_ggccsd, (self,), (None,))
         self._reg_procs = regs
 
     def ao2mo(self, mo_coeff=None):
         _make_eris_incore_ghf(self, mo_coeff)
         return 'Done'
+    
+    def pack(self):
+        return {'verbose'    : self.verbose,
+                'max_memory' : self.max_memory,
+                'frozen'     : self.frozen,
+                'mo_coeff'   : self.mo_coeff,
+                'mo_occ'     : self.mo_occ,
+                '_nocc'      : self._nocc,
+                '_nmo'       : self._nmo,
+                'diis_file'  : self.diis_file,
+                'level_shift': self.level_shift,
+                'direct'     : self.direct,
+                'diis_space' : self.diis_space,
+                'remove_h2'  : self.remove_h2,
+                'save_mem'   : self.save_mem,
+                'dt'         : self.dt,
+                'ignore_level_shift': self.ignore_level_shift
+                }
 
 # ************************************************************************
 # ao2mo routines

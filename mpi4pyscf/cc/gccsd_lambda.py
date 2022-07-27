@@ -388,10 +388,28 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     l1Tnew -= np.dot(tmp, mij.T)
     l1Tnew -= np.dot(mba.T, tmp)
     
-    eia = mo_e_o[:, None] - mo_e_v
-    l1Tnew /= eia.T
-    for i in range(vloc0, vloc1):
-        l2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
+    if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
+        # ZHC NOTE imagninary time evolution
+        if getattr(mycc, "ignore_level_shift", True):
+            mo_e_v = eris.mo_energy[nocc:]
+            eia = mo_e_o[:, None] - mo_e_v
+        else:
+            eia = mo_e_o[:, None] - mo_e_v
+        
+        dt = mycc.dt
+        l1Tnew *= (-dt)
+        l1Tnew += l1T * (1.0 + dt * eia.T)
+        
+        l2Tnew *= (-dt)
+        eia *= dt
+        for i in range(vloc0, vloc1):
+            ebij = lib.direct_sum('i + jb -> bij', eia[:, i] + 1, eia)
+            l2Tnew[i-vloc0] += l2T[i-vloc0] * ebij
+    else:
+        eia = mo_e_o[:, None] - mo_e_v
+        l1Tnew /= eia.T
+        for i in range(vloc0, vloc1):
+            l2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
 
     time0 = log.timer_debug1('update l1 l2', *time0)
     return l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1)

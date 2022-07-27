@@ -205,3 +205,32 @@ print ("rdm2 diff to ref", max_abs(rdm2 - rdm2_ref))
 
 assert max_abs(rdm2 - rdm2_ref) < 1e-7
 
+# imag time evolution
+from libdmet.solver import cc as cc_solver
+mycc = cc_solver.GGCCSDITE(mf)
+mycc.conv_tol = 1e-6
+mycc.conv_tol_normt = 1e-5
+mycc.max_cycle = 200
+mycc.dt = 0.01
+mycc.kernel()
+E_ref = mycc.e_corr
+rdm1_ref = mycc.make_rdm1(ao_repr=True)
+
+mycc = mpicc.gccsd.GGCCSD(mf)
+mycc.conv_tol = 1e-6
+mycc.conv_tol_normt = 1e-5
+mycc.max_cycle = 200
+mycc.dt = 0.01
+mycc.kernel()
+
+print ("E diff: ", abs(mycc.e_corr - E_ref))
+assert abs(mycc.e_corr - E_ref) < 1e-6
+
+mycc.solve_lambda()
+rdm1 = mycc.make_rdm1(ao_repr=True)
+
+print ("rdm1")
+print (rdm1)
+print ("rdm1 diff to ref", max_abs(rdm1 - rdm1_ref))
+assert max_abs(rdm1 - rdm1_ref) < 1e-5
+
