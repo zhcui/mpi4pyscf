@@ -88,11 +88,13 @@ def update_amps(mycc, t1, t2, eris):
     Foo = cc_Foo(t1T, t2T, eris, tauT_tilde=tauT_tilde, vlocs=vlocs)
     tauT_tilde = None
     Fov = cc_Fov(t1T, eris, vlocs=vlocs)
-
-    # Move energy terms to the other side
-    Fvv[np.diag_indices(nvir)] -= mo_e_v
-    Foo[np.diag_indices(nocc)] -= mo_e_o
-
+    
+    rk = comm.allreduce(getattr(mycc, "rk", None), op=mpi.MPI.LOR)
+    if not rk:
+        # Move energy terms to the other side
+        Fvv[np.diag_indices(nvir)] -= mo_e_v
+        Foo[np.diag_indices(nocc)] -= mo_e_o
+    
     # T1 equation
     t1Tnew  = np.dot(Fvv, t1T)
     t1Tnew -= np.dot(t1T, Foo)
@@ -178,29 +180,30 @@ def update_amps(mycc, t1, t2, eris):
         tmp = None
     tmpT = None
     
-    if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
-        # ZHC NOTE imagninary time evolution
-        if getattr(mycc, "ignore_level_shift", True):
-            mo_e_v = eris.mo_energy[nocc:]
-            eia = mo_e_o[:, None] - mo_e_v
+    if not rk:
+        if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
+            # ZHC NOTE imagninary time evolution
+            if getattr(mycc, "ignore_level_shift", True):
+                mo_e_v = eris.mo_energy[nocc:]
+                eia = mo_e_o[:, None] - mo_e_v
+            else:
+                eia = mo_e_o[:, None] - mo_e_v
+            
+            dt = mycc.dt
+            t1Tnew *= (-dt)
+            t1Tnew += t1T * (1.0 + dt * eia.T)
+            
+            t2Tnew *= (-dt)
+            eia *= dt
+            for i in range(vloc0, vloc1):
+                ebij = lib.direct_sum('i + jb -> bij', eia[:, i] + 1, eia)
+                t2Tnew[i-vloc0] += t2T[i-vloc0] * ebij
         else:
             eia = mo_e_o[:, None] - mo_e_v
-        
-        dt = mycc.dt
-        t1Tnew *= (-dt)
-        t1Tnew += t1T * (1.0 + dt * eia.T)
-        
-        t2Tnew *= (-dt)
-        eia *= dt
-        for i in range(vloc0, vloc1):
-            ebij = lib.direct_sum('i + jb -> bij', eia[:, i] + 1, eia)
-            t2Tnew[i-vloc0] += t2T[i-vloc0] * ebij
-    else:
-        eia = mo_e_o[:, None] - mo_e_v
-        t1Tnew /= eia.T
-        for i in range(vloc0, vloc1):
-            t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
-
+            t1Tnew /= eia.T
+            for i in range(vloc0, vloc1):
+                t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
+    
     time0 = log.timer_debug1('update t1 t2', *time0)
     return t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1)
 
@@ -1128,14 +1131,15 @@ class GGCCSD(GCCSD):
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
                  remove_h2=False, save_mem=False, dt=None, 
-                 ignore_level_shift=True):
+                 ignore_level_shift=True, rk=False):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
         self.save_mem = save_mem
         self.dt = dt
         self.ignore_level_shift = ignore_level_shift
-        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift"])
+        self.rk = rk
+        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift", "rk"])
 
         regs = mpi.pool.apply(_init_ggccsd, (self,), (None,))
         self._reg_procs = regs
@@ -1159,8 +1163,106 @@ class GGCCSD(GCCSD):
                 'remove_h2'  : self.remove_h2,
                 'save_mem'   : self.save_mem,
                 'dt'         : self.dt,
-                'ignore_level_shift': self.ignore_level_shift
+                'ignore_level_shift': self.ignore_level_shift,
+                'rk'         : self.rk
                 }
+
+# ************************************************************************
+# ITE routines
+# ************************************************************************
+
+def update_amps_rk(mycc, t1, t2, eris, fupdate=None):
+    """
+    Update amplitudes using RK4.
+    """
+    if fupdate is None:
+        fupdate = update_amps
+    
+    h = mycc.dt
+    dt11, dt21 = fupdate(mycc, t1, t2, eris)
+    t1_, t2_ = t1 + dt11 * (h*0.5), t2 + dt21 * (h*0.5)
+    dt1new = dt11
+    dt2new = dt21
+    
+    dt12, dt22 = fupdate(mycc, t1_, t2_, eris)
+    t1_, t2_ = t1 + dt12 * (h*0.5), t2 + dt22 * (h*0.5)
+    dt1new += (2.0 * dt12)
+    dt2new += (2.0 * dt22)
+    dt12 = dt22 = None
+    
+    dt13, dt23 = fupdate(mycc, t1_, t2_, eris)
+    t1_, t2_ = t1 + dt13 * h, t2 + dt23 * h
+    dt1new += (2.0 * dt13)
+    dt2new += (2.0 * dt23)
+    dt13 = dt23 = None
+    
+    dt14, dt24 = fupdate(mycc, t1_, t2_, eris)
+    t1_ = t2_ = None
+    dt1new += dt14
+    dt2new += dt24
+    dt14 = dt24 = None
+    
+    dt1new *= (-h / 6.0)
+    dt2new *= (-h / 6.0)
+    dt1new += t1
+    dt2new += t2
+
+    return dt1new, dt2new
+
+def _init_ggccsd_ite_rk(ccsd_obj):
+    from pyscf import gto
+    from mpi4pyscf.tools import mpi
+    from mpi4pyscf.cc import gccsd
+    if mpi.rank == 0:
+        mpi.comm.bcast((ccsd_obj.mol.dumps(), ccsd_obj.pack()))
+    else:
+        ccsd_obj = gccsd.GGCCSDITE_RK.__new__(gccsd.GGCCSDITE_RK)
+        ccsd_obj.t1 = ccsd_obj.t2 = ccsd_obj.l1 = ccsd_obj.l2 = None
+        mol, cc_attr = mpi.comm.bcast(None)
+        ccsd_obj.mol = gto.mole.loads(mol)
+        ccsd_obj.unpack_(cc_attr)
+        # ZHC NOTE no diis
+        ccsd_obj.diis = False
+    if False:  # If also to initialize cc._scf object
+        if mpi.rank == 0:
+            if hasattr(ccsd_obj._scf, '_scf'):
+                # ZHC FIXME a hack, newton need special treatment to broadcast
+                e_tot = ccsd_obj._scf.e_tot
+                ccsd_obj._scf = ccsd_obj._scf._scf
+                ccsd_obj._scf.e_tot = e_tot
+            mpi.comm.bcast((ccsd_obj._scf.__class__, _pack_scf(ccsd_obj._scf)))
+        else:
+            mf_cls, mf_attr = mpi.comm.bcast(None)
+            ccsd_obj._scf = mf_cls(ccsd_obj.mol)
+            ccsd_obj._scf.__dict__.update(mf_attr)
+
+    key = id(ccsd_obj)
+    mpi._registry[key] = ccsd_obj
+    regs = mpi.comm.gather(key)
+    return regs
+
+class GGCCSDITE_RK(GGCCSD):
+    """
+    MPI GGCCSD with ITE using RK.
+    """
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
+                 remove_h2=False, save_mem=False, dt=None, 
+                 ignore_level_shift=True, rk=True):
+        assert isinstance(mf, scf.ghf.GHF)
+        gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
+        self.remove_h2 = remove_h2
+        self.save_mem = save_mem
+        self.dt = dt
+        self.ignore_level_shift = ignore_level_shift
+        self.rk = rk
+        if self.rk:
+            self.diis = False
+        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift", "rk"])
+
+        regs = mpi.pool.apply(_init_ggccsd_ite_rk, (self,), (None,))
+        self._reg_procs = regs
+
+    update_amps = update_amps_rk
 
 # ************************************************************************
 # ao2mo routines

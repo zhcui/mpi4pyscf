@@ -73,8 +73,13 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     
     if fintermediates is None:
         fintermediates = make_intermediates
+    
     if fupdate is None:
-        fupdate = update_lambda
+        rk = comm.allreduce(getattr(mycc, "rk", None), op=mpi.MPI.LOR)
+        if rk:
+            fupdate = update_lambda_rk
+        else:
+            fupdate = update_lambda
 
     imds = fintermediates(mycc, t1, t2, eris)
 
@@ -281,8 +286,15 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     fvo = eris.fock[nocc:, :nocc]
     mo_e_o = eris.mo_energy[:nocc]
     mo_e_v = eris.mo_energy[nocc:] + mycc.level_shift
-    v1 = imds.v1 - np.diag(mo_e_v)
-    v2 = imds.v2 - np.diag(mo_e_o)
+    
+    rk = comm.allreduce(getattr(mycc, "rk", None), op=mpi.MPI.LOR)
+    
+    if rk:
+        v1 = imds.v1
+        v2 = imds.v2
+    else:
+        v1 = imds.v1 - np.diag(mo_e_v)
+        v2 = imds.v2 - np.diag(mo_e_o)
 
     mba = einsum('cakl, cbkl -> ba', l2T, t2T) * 0.5
     mba = mpi.allreduce_inplace(mba)
@@ -388,31 +400,38 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
     l1Tnew -= np.dot(tmp, mij.T)
     l1Tnew -= np.dot(mba.T, tmp)
     
-    if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
-        # ZHC NOTE imagninary time evolution
-        if getattr(mycc, "ignore_level_shift", True):
-            mo_e_v = eris.mo_energy[nocc:]
-            eia = mo_e_o[:, None] - mo_e_v
+    if not rk:
+        if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
+            # ZHC NOTE imagninary time evolution
+            if getattr(mycc, "ignore_level_shift", True):
+                mo_e_v = eris.mo_energy[nocc:]
+                eia = mo_e_o[:, None] - mo_e_v
+            else:
+                eia = mo_e_o[:, None] - mo_e_v
+            
+            dt = mycc.dt
+            l1Tnew *= (-dt)
+            l1Tnew += l1T * (1.0 + dt * eia.T)
+            
+            l2Tnew *= (-dt)
+            eia *= dt
+            for i in range(vloc0, vloc1):
+                ebij = lib.direct_sum('i + jb -> bij', eia[:, i] + 1, eia)
+                l2Tnew[i-vloc0] += l2T[i-vloc0] * ebij
         else:
             eia = mo_e_o[:, None] - mo_e_v
-        
-        dt = mycc.dt
-        l1Tnew *= (-dt)
-        l1Tnew += l1T * (1.0 + dt * eia.T)
-        
-        l2Tnew *= (-dt)
-        eia *= dt
-        for i in range(vloc0, vloc1):
-            ebij = lib.direct_sum('i + jb -> bij', eia[:, i] + 1, eia)
-            l2Tnew[i-vloc0] += l2T[i-vloc0] * ebij
-    else:
-        eia = mo_e_o[:, None] - mo_e_v
-        l1Tnew /= eia.T
-        for i in range(vloc0, vloc1):
-            l2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
+            l1Tnew /= eia.T
+            for i in range(vloc0, vloc1):
+                l2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
 
     time0 = log.timer_debug1('update l1 l2', *time0)
     return l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1)
+
+def update_lambda_rk(mycc, t1, t2, l1, l2, eris, imds):
+    from mpi4pyscf.cc.gccsd import update_amps_rk
+    def fupdate(mycc, l1, l2, eris):
+        return update_lambda(mycc, t1, t2, l1, l2, eris, imds)
+    return update_amps_rk(mycc, l1, l2, eris, fupdate=fupdate)
 
 if __name__ == '__main__':
     from pyscf import gto
