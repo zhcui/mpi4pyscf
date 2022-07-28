@@ -28,6 +28,8 @@ rank = mpi.rank
 
 BLKMIN = getattr(__config__, 'cc_ccsd_blkmin', 4)
 MEMORYMIN = getattr(__config__, 'cc_ccsd_memorymin', 2000)
+ASYNC = getattr(__config__, 'mpicc_async', True)
+
 
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
@@ -494,7 +496,6 @@ def _task_location(n, task=rank):
     loc1 = div_points[task + 1]
     return loc0, loc1
 
-ASYNC = True
 if ASYNC:
     def _rotate_tensor_block(buf):
         ntasks = mpi.pool.size
