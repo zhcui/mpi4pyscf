@@ -1246,7 +1246,7 @@ class GGCCSDITE_RK(GGCCSD):
     MPI GGCCSD with ITE using RK.
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
-                 remove_h2=False, save_mem=False, dt=None, 
+                 remove_h2=False, save_mem=False, dt=0.1, 
                  ignore_level_shift=True, rk=True):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
@@ -1261,6 +1261,12 @@ class GGCCSDITE_RK(GGCCSD):
 
         regs = mpi.pool.apply(_init_ggccsd_ite_rk, (self,), (None,))
         self._reg_procs = regs
+    
+    def dump_flags(self, verbose=None):
+        if rank == 0:
+            GGCCSD.dump_flags(self, verbose)
+            logger.info(self, 'ITE dt = %.5g', self.dt)
+        return self
 
     update_amps = update_amps_rk
 
