@@ -904,6 +904,7 @@ class GCCSD(gccsd.GCCSD):
                 '_nocc'      : self._nocc,
                 '_nmo'       : self._nmo,
                 'diis_file'  : self.diis_file,
+                'diis_start_cycle' : self.diis_start_cycle,
                 'level_shift': self.level_shift,
                 'direct'     : self.direct,
                 'diis_space' : self.diis_space}
@@ -1160,6 +1161,7 @@ class GGCCSD(GCCSD):
                 'level_shift': self.level_shift,
                 'direct'     : self.direct,
                 'diis_space' : self.diis_space,
+                'diis_start_cycle' : self.diis_start_cycle,
                 'remove_h2'  : self.remove_h2,
                 'save_mem'   : self.save_mem,
                 'dt'         : self.dt,
@@ -1221,8 +1223,7 @@ def _init_ggccsd_ite_rk(ccsd_obj):
         mol, cc_attr = mpi.comm.bcast(None)
         ccsd_obj.mol = gto.mole.loads(mol)
         ccsd_obj.unpack_(cc_attr)
-        # ZHC NOTE no diis
-        ccsd_obj.diis = False
+
     if False:  # If also to initialize cc._scf object
         if mpi.rank == 0:
             if hasattr(ccsd_obj._scf, '_scf'):
@@ -1247,7 +1248,7 @@ class GGCCSDITE_RK(GGCCSD):
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
                  remove_h2=False, save_mem=False, dt=0.1, 
-                 ignore_level_shift=True, rk=True):
+                 ignore_level_shift=True, rk=True, diis_start_cycle=999999):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -1255,8 +1256,7 @@ class GGCCSDITE_RK(GGCCSD):
         self.dt = dt
         self.ignore_level_shift = ignore_level_shift
         self.rk = rk
-        if self.rk:
-            self.diis = False
+        self.diis_start_cycle = diis_start_cycle
         self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift", "rk"])
 
         regs = mpi.pool.apply(_init_ggccsd_ite_rk, (self,), (None,))
