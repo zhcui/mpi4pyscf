@@ -1132,7 +1132,7 @@ class GGCCSD(GCCSD):
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
                  remove_h2=False, save_mem=False, dt=None, 
-                 ignore_level_shift=True, rk=False):
+                 ignore_level_shift=True, rk=False, rk_order=4):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -1140,7 +1140,9 @@ class GGCCSD(GCCSD):
         self.dt = dt
         self.ignore_level_shift = ignore_level_shift
         self.rk = rk
-        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift", "rk"])
+        self.rk_order = rk_order
+        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift",
+                                       "rk", "rk_order"])
 
         regs = mpi.pool.apply(_init_ggccsd, (self,), (None,))
         self._reg_procs = regs
@@ -1166,7 +1168,8 @@ class GGCCSD(GCCSD):
                 'save_mem'   : self.save_mem,
                 'dt'         : self.dt,
                 'ignore_level_shift': self.ignore_level_shift,
-                'rk'         : self.rk
+                'rk'         : self.rk,
+                'rk_order'   : self.rk_order
                 }
 
 # ************************************************************************
@@ -1182,30 +1185,34 @@ def update_amps_rk(mycc, t1, t2, eris, fupdate=None):
     
     h = mycc.dt
     dt11, dt21 = fupdate(mycc, t1, t2, eris)
-    t1_, t2_ = t1 + dt11 * (h*0.5), t2 + dt21 * (h*0.5)
     dt1new = dt11
     dt2new = dt21
-    
-    dt12, dt22 = fupdate(mycc, t1_, t2_, eris)
-    t1_, t2_ = t1 + dt12 * (h*0.5), t2 + dt22 * (h*0.5)
-    dt1new += (2.0 * dt12)
-    dt2new += (2.0 * dt22)
-    dt12 = dt22 = None
-    
-    dt13, dt23 = fupdate(mycc, t1_, t2_, eris)
-    t1_, t2_ = t1 + dt13 * h, t2 + dt23 * h
-    dt1new += (2.0 * dt13)
-    dt2new += (2.0 * dt23)
-    dt13 = dt23 = None
-    
-    dt14, dt24 = fupdate(mycc, t1_, t2_, eris)
-    t1_ = t2_ = None
-    dt1new += dt14
-    dt2new += dt24
-    dt14 = dt24 = None
-    
-    dt1new *= (-h / 6.0)
-    dt2new *= (-h / 6.0)
+    if mycc.rk_order != 1:
+        t1_, t2_ = t1 + dt11 * (h*0.5), t2 + dt21 * (h*0.5)
+        dt12, dt22 = fupdate(mycc, t1_, t2_, eris)
+        t1_, t2_ = t1 + dt12 * (h*0.5), t2 + dt22 * (h*0.5)
+        dt1new += (2.0 * dt12)
+        dt2new += (2.0 * dt22)
+        dt12 = dt22 = None
+        
+        dt13, dt23 = fupdate(mycc, t1_, t2_, eris)
+        t1_, t2_ = t1 + dt13 * h, t2 + dt23 * h
+        dt1new += (2.0 * dt13)
+        dt2new += (2.0 * dt23)
+        dt13 = dt23 = None
+        
+        dt14, dt24 = fupdate(mycc, t1_, t2_, eris)
+        t1_ = t2_ = None
+        dt1new += dt14
+        dt2new += dt24
+        dt14 = dt24 = None
+        
+        dt1new *= (-h / 6.0)
+        dt2new *= (-h / 6.0)
+    else:
+        dt1new *= (-h)
+        dt2new *= (-h)
+
     dt1new += t1
     dt2new += t2
 
@@ -1248,7 +1255,8 @@ class GGCCSDITE_RK(GGCCSD):
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
                  remove_h2=False, save_mem=False, dt=0.1, 
-                 ignore_level_shift=True, rk=True, diis_start_cycle=999999):
+                 ignore_level_shift=True, rk=True, rk_order=4,
+                 diis_start_cycle=999999):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -1256,8 +1264,10 @@ class GGCCSDITE_RK(GGCCSD):
         self.dt = dt
         self.ignore_level_shift = ignore_level_shift
         self.rk = rk
+        self.rk_order = rk_order
         self.diis_start_cycle = diis_start_cycle
-        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift", "rk"])
+        self._keys = self._keys.union(["remove_h2", "save_mem", "dt", "ignore_level_shift",
+                                       "rk", "rk_order"])
 
         regs = mpi.pool.apply(_init_ggccsd_ite_rk, (self,), (None,))
         self._reg_procs = regs
@@ -1266,6 +1276,7 @@ class GGCCSDITE_RK(GGCCSD):
         if rank == 0:
             GGCCSD.dump_flags(self, verbose)
             logger.info(self, 'ITE dt = %.5g', self.dt)
+            logger.info(self, 'rk order = %s', self.rk_order)
         return self
 
     update_amps = update_amps_rk
