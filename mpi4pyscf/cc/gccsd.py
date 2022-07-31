@@ -183,11 +183,12 @@ def update_amps(mycc, t1, t2, eris):
     if not rk:
         if comm.allreduce(getattr(mycc, "dt", None), op=mpi.MPI.LOR):
             # ZHC NOTE imagninary time evolution
-            if getattr(mycc, "ignore_level_shift", True):
-                mo_e_v = eris.mo_energy[nocc:]
-                eia = mo_e_o[:, None] - mo_e_v
-            else:
-                eia = mo_e_o[:, None] - mo_e_v
+            #if getattr(mycc, "ignore_level_shift", True):
+            #    mo_e_v = eris.mo_energy[nocc:]
+            #    eia = mo_e_o[:, None] - mo_e_v
+            #else:
+            #    eia = mo_e_o[:, None] - mo_e_v
+            eia = mo_e_o[:, None] - mo_e_v
             
             dt = mycc.dt
             t1Tnew *= (-dt)
