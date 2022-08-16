@@ -92,7 +92,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
             offsets.append((0, sizes[i]))
         else:
             offsets.append((sizes[i-1], sizes[i]))
-    x0 = mpi.gather_new(x0).ravel()
+    x0 = mpi.allgather_new(x0).ravel()
     
     def v2a(x):
         """
@@ -110,7 +110,7 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
         amps (distributed) to vector (at root).
         """
         res = mycc.amplitudes_to_vector(t1, t2, out=out).reshape(-1, seg)
-        res = mpi.gather_new(res).ravel()
+        res = mpi.allgather_new(res).ravel()
         return res
 
     def f_res(x):
