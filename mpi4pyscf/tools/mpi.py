@@ -346,10 +346,14 @@ def scatter_new(sendbuf, root=0, data=None):
         dtype, counts, matched = comm.bcast(None)
 
     if matched:
-        elem_dtype = MPI._typedict.get(dtype.char)
-        each_count = numpy.prod(shape[1:])
-        counts = counts // each_count
-        mpi_dtype = MPI.Datatype(elem_dtype).Create_contiguous(each_count).Commit()
+        each_count = int(numpy.prod(shape[1:]))
+        if each_count > 1:
+            counts = counts // each_count
+            elem_dtype = MPI._typedict.get(dtype.char)
+            mpi_dtype = MPI.Datatype(elem_dtype).Create_contiguous(each_count).Commit()
+        else:
+            each_count = 1
+            mpi_dtype = dtype
     else:
         each_count = 1
         mpi_dtype = dtype
@@ -361,7 +365,7 @@ def scatter_new(sendbuf, root=0, data=None):
         counts_seg = _segment_counts(counts, p0, p1)
         comm.Scatterv([sendbuf, counts_seg, displs+p0, mpi_dtype],
                       [recvbuf[p0*each_count:p1*each_count], mpi_dtype], root)
-    if matched:
+    if matched and each_count > 1:
         mpi_dtype.Free()
     return recvbuf.reshape(shape)
 
@@ -424,10 +428,13 @@ def gather_new(sendbuf, root=0, split_recvbuf=False):
     
     matched = all([x[1:] == rshape[0][1:] for x in rshape[1:]])
     if matched:
-        elem_dtype = MPI._typedict.get(mpi_dtype)
-        each_count = numpy.prod(rshape[0][1:])
-        counts = counts // each_count
-        mpi_dtype = MPI.Datatype(elem_dtype).Create_contiguous(each_count).Commit()
+        each_count = int(numpy.prod(rshape[0][1:]))
+        if each_count > 1:
+            counts = counts // each_count
+            elem_dtype = MPI._typedict.get(mpi_dtype)
+            mpi_dtype = MPI.Datatype(elem_dtype).Create_contiguous(each_count).Commit()
+        else:
+            each_count = 1
     else:
         each_count = 1
 
@@ -440,7 +447,7 @@ def gather_new(sendbuf, root=0, split_recvbuf=False):
             counts_seg = _segment_counts(counts, p0, p1)
             comm.Gatherv([sendbuf[p0*each_count:p1*each_count], mpi_dtype],
                          [recvbuf, counts_seg, displs+p0, mpi_dtype], root)
-        if matched:
+        if matched and each_count > 1:
             mpi_dtype.Free()
         if split_recvbuf:
             return [recvbuf[p0*each_count:(p0+c)*each_count].reshape(shape)
@@ -454,7 +461,7 @@ def gather_new(sendbuf, root=0, split_recvbuf=False):
         send_seg = sendbuf.ravel()
         for p0, p1 in lib.prange(0, numpy.max(counts), BLKSIZE):
             comm.Gatherv([send_seg[p0*each_count:p1*each_count], mpi_dtype], None, root)
-        if matched:
+        if matched and each_count > 1:
             mpi_dtype.Free()
         return sendbuf
 
@@ -499,10 +506,13 @@ def allgather_new(sendbuf, split_recvbuf=False):
     matched = all([x[1:] == rshape[0][1:] for x in rshape[1:]])
     
     if matched:
-        elem_dtype = MPI._typedict.get(mpi_dtype)
-        each_count = numpy.prod(rshape[0][1:])
-        counts = counts // each_count
-        mpi_dtype = MPI.Datatype(elem_dtype).Create_contiguous(each_count).Commit()
+        each_count = int(numpy.prod(rshape[0][1:]))
+        if each_count > 1:
+            counts = counts // each_count
+            elem_dtype = MPI._typedict.get(mpi_dtype)
+            mpi_dtype = MPI.Datatype(elem_dtype).Create_contiguous(each_count).Commit()
+        else:
+            each_count = 1
     else:
         each_count = 1
         
@@ -513,7 +523,7 @@ def allgather_new(sendbuf, split_recvbuf=False):
         counts_seg = _segment_counts(counts, p0, p1)
         comm.Allgatherv([sendbuf[p0*each_count:p1*each_count], mpi_dtype],
                         [recvbuf, counts_seg, displs+p0, mpi_dtype])
-    if matched:
+    if matched and each_count > 1:
         mpi_dtype.Free()
     if split_recvbuf:
         return [recvbuf[p0*each_count:(p0+c)*each_count].reshape(shape)

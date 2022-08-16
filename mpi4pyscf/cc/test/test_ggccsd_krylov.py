@@ -134,91 +134,21 @@ mf = mf.newton()
 
 # ref serial GCCSD
 from libdmet.solver import cc as cc_solver
-mycc = cc_solver.GGCCSD(mf)
-mycc.conv_tol = 1e-10
-mycc.conv_tol_normt = 1e-8
+mycc = cc_solver.GGCCSD_KRYLOV(mf)
+mycc.conv_tol = 1e-9
+mycc.conv_tol_normt = 1e-7
 mycc.max_cycle = 50
 mycc.kernel()
 
-l1_ref, l2_ref = mycc.solve_lambda()
 
-rdm1_ref = mycc.make_rdm1(ao_repr=True)
-rdm2_ref = mycc.make_rdm2(ao_repr=True)
-
-
-mycc = mpicc.gccsd.GGCCSD(mf)
-mycc.conv_tol = 1e-10
-mycc.conv_tol_normt = 1e-8
-mycc.max_cycle = 50
-mycc.kernel()
-
-# test rotation of amplitudes
-from libdmet.solver.cc import transform_t1_to_bo, transform_t2_to_bo
-mycc.save_amps()
-
-t1_ref, t2_ref = mycc.gather_amplitudes()
-umat = np.random.random((mycc.nmo, mycc.nmo))
-
-t1_trans = transform_t1_to_bo(t1_ref, umat)
-t2_trans = transform_t2_to_bo(t2_ref, umat)
-
-mycc.restore_from_h5(umat=umat)
-t1, t2 = mycc.gather_amplitudes()
-
-print ("t1 trans diff ", max_abs(t1 - t1_trans))
-print ("t2 trans diff ", max_abs(t2 - t2_trans))
-
-assert max_abs(t1 - t1_trans) < 1e-10
-assert max_abs(t1 - t1_trans) < 1e-10
-
-mycc = mpicc.gccsd.GGCCSD(mf)
-mycc.conv_tol = 1e-10
-mycc.conv_tol_normt = 1e-8
-mycc.max_cycle = 50
-mycc.restore_from_h5(umat=np.eye(mycc.nmo))
-mycc.kernel()
-
-print ("E diff: ", abs(mycc.e_corr - -0.134698069373674))
-assert abs(mycc.e_corr - -0.134698069373674) < 1e-8
-mycc.solve_lambda()
-
-print ("-" * 79)
-l1, l2 = mycc.gather_lambda()
-print ("l1 diff ", max_abs(l1 - l1_ref))
-print ("l2 diff ", max_abs(l2 - l2_ref))
-
-assert max_abs(l1 - l1_ref) < 1e-9
-assert max_abs(l2 - l2_ref) < 1e-9
-
-rdm1 = mycc.make_rdm1(ao_repr=True)
-
-print ("rdm1")
-print (rdm1)
-print ("rdm1 diff to ref", max_abs(rdm1 - rdm1_ref))
-
-print ("-" * 79)
-rdm2 = mycc.make_rdm2(ao_repr=True)
-
-print ("rdm2")
-print (rdm2.shape)
-print ("rdm2 diff to ref", max_abs(rdm2 - rdm2_ref))
-
-assert max_abs(rdm2 - rdm2_ref) < 1e-7
-
-# imag time evolution
-from libdmet.solver import cc as cc_solver
-mycc = cc_solver.GGCCSDITE_RK(mf, dt=0.01)
-mycc.conv_tol = 1e-7
-mycc.conv_tol_normt = 1e-6
-mycc.max_cycle = 200
-#mycc.dt = 0.05
-mycc.kernel()
+# krylov
 E_ref = mycc.e_corr
 rdm1_ref = mycc.make_rdm1(ao_repr=True)
 
-mycc = mpicc.gccsd.GGCCSDITE_RK(mf, dt=0.01, diis_start_cycle=100)
-mycc.conv_tol = 1e-7
-mycc.conv_tol_normt = 1e-6
+
+mycc = mpicc.gccsd_krylov.GGCCSD_KRYLOV(mf)
+mycc.conv_tol = 1e-9
+mycc.conv_tol_normt = 1e-7
 mycc.max_cycle = 200
 mycc.kernel()
 
