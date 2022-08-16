@@ -33,11 +33,11 @@ rank = mpi.rank
 einsum = lib.einsum
 
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
-def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
-           max_cycle=50, tol=1e-6, verbose=None,
-           fintermediates=None, fupdate=None, approx_l=False):
+def pre_kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
+               max_cycle=50, tol=1e-6, verbose=None,
+               fintermediates=None, fupdate=None, approx_l=False):
     """
-    CCSD lambda kernel.
+    ao2mo, init l1 l2, imds, distribute vec, cycle = 0.
     """
     log = logger.new_logger(mycc, verbose)
     cput0 = (logger.process_clock(), logger.perf_counter())
@@ -66,88 +66,103 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     if approx_l:
         mycc.l1 = l1
         mycc.l2 = l2
-        conv = True
-        return conv, l1, l2
+        return mycc
     
     if fintermediates is None:
         fintermediates = make_intermediates
     
-    if fupdate is None:
-        fupdate = update_lambda
-
     imds = fintermediates(mycc, t1, t2, eris)
+    mycc._imds = imds
 
     cput1 = log.timer('CCSD lambda initialization', *cput0)
 
-    nocc, nvir = l1.shape
-    cycle = [0]
-    
-    # ZHC NOTE here is to avoid the overflow of displacement
-    if nocc % 2 == 0:
-        seg = nocc // 2
-    else:
-        seg = 1
-    
-    x0 = mycc.amplitudes_to_vector(l1, l2).reshape(-1, seg)
-    sizes = np.cumsum(comm.allgather(x0.shape[0]))
-    offsets = []
-    for i in range(len(sizes)):
-        if i == 0:
-            offsets.append((0, sizes[i]))
-        else:
-            offsets.append((sizes[i-1], sizes[i]))
-    x0 = mpi.allgather_new(x0).ravel()
-    
-    def v2a(x):
-        """
-        vector (at root) to amps (distributed).
-        """
-        x = x.reshape(-1, seg)
-        vec_send = [x[offset[0]:offset[1]] for offset in offsets]
-        vec_data = x
-        vec = mpi.scatter_new(vec_send, data=vec_data).ravel()
-        l1, l2 = mycc.vector_to_amplitudes(vec)
-        return l1, l2
+    mycc.l1 = l1
+    mycc.l2 = l2
+    vec = mycc.amplitudes_to_vector(l1, l2)
+    mycc.vec = mycc.gather_vector(vec)
+    mycc.cycle = 0
+    return mycc
 
-    def a2v(l1, l2, out=None):
-        """
-        amps (distributed) to vector (at root).
-        """
-        res = mycc.amplitudes_to_vector(l1, l2, out=out).reshape(-1, seg)
-        res = mpi.allgather_new(res).ravel()
-        return res
+@mpi.parallel_call
+def get_lambda_res(mycc, x):
+    """
+    Get the residual vector of CC lambda.
 
-    def f_res(x):
-        # first scatter the vector
-        l1, l2 = v2a(x)
-        
-        l1, l2 = fupdate(mycc, t1, t2, l1, l2, eris, imds)
-        
-        # then gather the vector
-        res = a2v(l1, l2, out=None)
-
-        norm = safe_max_abs(res)
-        log.info("      cycle = %5d , norm(res) = %15.5g", cycle[0], norm)
-        cycle[0] += 1
-        return res 
+    Args:
+        x: vector of CC amps (at root).
+    Returns:
+        res: vector of residual (at root).
+    """
+    _sync_(mycc)
+    log = logger.new_logger(mycc, mycc.verbose)
+    eris = getattr(mycc, '_eris', None)
+    imds = getattr(mycc, '_imds', None)
+    t1, t2 = mycc.t1, mycc.t2
     
+    # firs distribute x to l1 and l2
+    vec = mycc.distribute_vector_(x, write='l')
+    l1, l2 = mycc.l1, mycc.l2
+
+    l1, l2 = update_lambda(mycc, t1, t2, l1, l2, eris, imds)
+
+    # then gather the vector
+    res = mycc.amplitudes_to_vector(l1, l2)
+    norm = safe_max_abs(res)
+    norm = comm.allreduce(norm, op=mpi.MPI.MAX)
+    log.info("      cycle = %5d , norm(res) = %15.5g", mycc.cycle, norm)
+    mycc.cycle += 1
+
+    res = mycc.gather_vector(res)
+    return res
+
+@mpi.parallel_call
+def mop(mycc, x):
+    """
+    preconditioner.
+
+    Args:
+        x: vector of CC amps (at root).
+    Returns:
+        res: x after applied precond.
+    """
+    _sync_(mycc)
+    eris = getattr(mycc, '_eris', None)
+    
+    vec = mycc.distribute_vector_(x, write='l')
+    l1, l2 = mycc.l1, mycc.l2
     if mycc.precond == 'finv':
-        def mop(x):
-            l1, l2 = v2a(x)
-            l1, l2 = mycc.precond_finv(l1, l2, eris)
-            return a2v(l1, l2)
-        M = spla.LinearOperator((x0.shape[-1], x0.shape[-1]), matvec=mop)
-    elif mycc.precond == 'diag':
-        def mop(x):
-            l1, l2 = v2a(x)
-            l1, l2 = mycc.precond_diag(l1, l2, eris)
-            return a2v(l1, l2)
-        M = spla.LinearOperator((x0.shape[-1], x0.shape[-1]), matvec=mop)
+        l1, l2 = precond_finv(mycc, l1, l2, eris)
     else:
-        M = None
-    
+        l1, l2 = precond_diag(mycc, l1, l2, eris)
+    res = mycc.amplitudes_to_vector(l1, l2)
+    res = mycc.gather_vector(res)
+    return res
+
+@mpi.parallel_call
+def release_imds(mycc):
+    mycc._imds = None
+
+def kernel(mycc):
+    """
+    Krylov kernel.
+    """
     froot = opt.root
     tolnormt = mycc.conv_tol_normt
+    max_cycle = mycc.max_cycle
+    vec_size = mycc.vec.size
+    
+    def mop_(x):
+        return mop(mycc, x)
+    if mycc.precond is None:
+        M = None
+    else:
+        M = spla.LinearOperator((vec_size, vec_size), matvec=mop_)
+    
+    def f_res(x):
+        return get_lambda_res(mycc, x)
+    
+    x0 = mycc.vec
+
     if mycc.method == 'krylov':
         inner_m = mycc.inner_m
         outer_k = mycc.outer_k
@@ -159,20 +174,13 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
                                              'inner_inner_m': inner_m, 'inner_tol': tolnormt * 0.5,
                                              'outer_k': outer_k, 'inner_M': M}
                             })
-    elif mycc.method == 'df-sane':
-        res = froot(f_res, x0, method='df-sane',
-                    options={'fatol': tolnormt, 'disp': True, 'maxfev': max_cycle,
-                             'fnorm': safe_max_abs})
     else:
         raise ValueError
     
+    release_imds(mycc)
     conv = res.success
-    l1, l2 = v2a(res.x)
-
-    mycc.l1 = l1
-    mycc.l2 = l2
-    log.timer('CCSD lambda', *cput0)
-    return conv, l1, l2
+    mycc.distribute_vector_(res.x, write='l')
+    return conv, mycc.l1, mycc.l2
 
 if __name__ == '__main__':
     from pyscf import gto

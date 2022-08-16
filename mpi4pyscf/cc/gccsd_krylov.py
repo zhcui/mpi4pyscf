@@ -22,6 +22,8 @@ MPI-GCCSD with real intergals using Newton-Krylov solver.
 Usage: mpirun -np 2 python gccsd.py
 """
 
+from functools import reduce
+import math
 import numpy as np
 import scipy.linalg as la
 from scipy import optimize as opt
@@ -50,8 +52,11 @@ def safe_max_abs(x):
         return 1e+12
 
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
-def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
-           tolnormt=1e-6, verbose=None):
+def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
+               tolnormt=1e-6, verbose=None):
+    """
+    ao2mo, init_amps, gather vector, cycle = 0.
+    """
     log = logger.new_logger(mycc, verbose)
     cput0 = (logger.process_clock(), logger.perf_counter())
     _sync_(mycc)
@@ -75,80 +80,129 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
     eccsd = mycc.energy(t1, t2, eris)
     log.info('Init E(CCSD) = %.15g', eccsd)
     
-    nocc, nvir = t1.shape
-    cycle = [0]
+    mycc.t1 = t1
+    mycc.t2 = t2
+    vec = mycc.amplitudes_to_vector(t1, t2)
+    mycc.vec = mycc.gather_vector(vec)
+    mycc.cycle = 0
+    return mycc
     
-    # ZHC NOTE here is to avoid the overflow of displacement
-    if nocc % 2 == 0:
-        seg = nocc // 2
-    else:
-        seg = 1
-    
-    x0 = mycc.amplitudes_to_vector(t1, t2).reshape(-1, seg)
-    sizes = np.cumsum(comm.allgather(x0.shape[0]))
+@mpi.parallel_call
+def distribute_vector_(mycc, vec=None, write='t'):
+    """
+    Distribute the entire vector of amplitudes tensor (nvec,) to
+    different processes.
+    will overwrite t1, t2 or l1, l2 according to write.
+    """
+    _sync_(mycc)
+    sizes = comm.allgather(mycc.vector_size())
+    # ZHC NOTE use gcd to avoid overflow of displacement.
+    seg = reduce(math.gcd, sizes)
+    sizes = np.cumsum(sizes)
     offsets = []
     for i in range(len(sizes)):
         if i == 0:
             offsets.append((0, sizes[i]))
         else:
             offsets.append((sizes[i-1], sizes[i]))
-    x0 = mpi.allgather_new(x0).ravel()
-    
-    def v2a(x):
-        """
-        vector (at root) to amps (distributed).
-        """
-        x = x.reshape(-1, seg)
-        vec_send = [x[offset[0]:offset[1]] for offset in offsets]
-        vec_data = x
-        vec = mpi.scatter_new(vec_send, data=vec_data).ravel()
-        t1, t2 = mycc.vector_to_amplitudes(vec)
-        return t1, t2
 
-    def a2v(t1, t2, out=None):
-        """
-        amps (distributed) to vector (at root).
-        """
-        res = mycc.amplitudes_to_vector(t1, t2, out=out).reshape(-1, seg)
-        res = mpi.allgather_new(res).ravel()
-        return res
-
-    def f_res(x):
-        # first scatter the vector
-        t1, t2 = v2a(x)
-        
-        eccsd = mycc.energy(t1, t2, eris)
-        t1, t2 = mycc.update_amps(t1, t2, eris)
-        
-        # then gather the vector
-        res = a2v(t1, t2, out=None)
-
-        norm = safe_max_abs(res)
-        log.info("      cycle = %5d , E = %15.8g , norm(res) = %15.5g", cycle[0],
-                 eccsd, norm)
-        cycle[0] += 1
-        return res 
-    
-    if mycc.precond == 'finv':
-        def mop(x):
-            t1, t2 = v2a(x)
-            t1, t2 = mycc.precond_finv(t1, t2, eris)
-            return a2v(t1, t2)
-        M = spla.LinearOperator((x0.shape[-1], x0.shape[-1]), matvec=mop)
-    elif mycc.precond == 'diag':
-        def mop(x):
-            t1, t2 = v2a(x)
-            t1, t2 = mycc.precond_diag(t1, t2, eris)
-            return a2v(t1, t2)
-        M = spla.LinearOperator((x0.shape[-1], x0.shape[-1]), matvec=mop)
+    if rank == 0:
+        vec_segs = [vec[offset[0]:offset[1]].reshape(-1, seg) for offset in offsets]
+        vec = mpi.scatter_new(vec_segs, data=vec)
     else:
-        M = None
+        vec = mpi.scatter_new(None)
+    vec = vec.ravel()
+    if write == 't':
+        mycc.t1, mycc.t2 = mycc.vector_to_amplitudes(vec)
+    else:
+        mycc.l1, mycc.l2 = mycc.vector_to_amplitudes(vec)
+    return vec
+
+@mpi.parallel_call
+def gather_vector(mycc, vec=None):
+    """
+    Reconstruct the vector of amplitudes from the distributed vector.
+    """
+    sizes = comm.allgather(mycc.vector_size())
+    seg = reduce(math.gcd, sizes)
+    vec = mpi.gather_new(vec.reshape(-1, seg)).ravel()
+    return vec
+
+@mpi.parallel_call
+def get_res(mycc, x):
+    """
+    Get the residual vector of CC.
+
+    Args:
+        x: vector of CC amps (at root).
+    Returns:
+        res: vector of residual (at root).
+    """
+    _sync_(mycc)
+    log = logger.new_logger(mycc, mycc.verbose)
+    eris = getattr(mycc, '_eris', None)
     
+    # firs distribute x to t1 and t2
+    vec = mycc.distribute_vector_(x)
+    t1, t2 = mycc.t1, mycc.t2
+
+    eccsd = mycc.energy(t1, t2, eris)
+    t1, t2 = mycc.update_amps(t1, t2, eris)
+
+    # then gather the vector
+    res = mycc.amplitudes_to_vector(t1, t2)
+    norm = safe_max_abs(res)
+    norm = comm.allreduce(norm, op=mpi.MPI.MAX)
+    log.info("      cycle = %5d , E = %15.8g , norm(res) = %15.5g", mycc.cycle,
+             eccsd, norm)
+    mycc.cycle += 1
+
+    res = mycc.gather_vector(res)
+    return res
+
+@mpi.parallel_call
+def mop(mycc, x):
+    """
+    preconditioner.
+
+    Args:
+        x: vector of CC amps (at root).
+    Returns:
+        res: x after applied precond.
+    """
+    _sync_(mycc)
+    eris = getattr(mycc, '_eris', None)
+    
+    vec = mycc.distribute_vector_(x)
+    t1, t2 = mycc.t1, mycc.t2
+    if mycc.precond == 'finv':
+        t1, t2 = precond_finv(mycc, t1, t2, eris)
+    else:
+        t1, t2 = precond_diag(mycc, t1, t2, eris)
+    res = mycc.amplitudes_to_vector(t1, t2)
+    res = mycc.gather_vector(res)
+    return res
+
+def kernel(mycc):
+    """
+    Krylov kernel.
+    """
     froot = opt.root
+    tolnormt = mycc.conv_tol_normt
+    max_cycle = mycc.max_cycle
+    vec_size = mycc.vec.size
+
+    if mycc.precond is None:
+        M = None
+    else:
+        M = spla.LinearOperator((vec_size, vec_size), matvec=mycc.mop)
+    
+    x0 = mycc.vec
+
     if mycc.method == 'krylov':
         inner_m = mycc.inner_m
         outer_k = mycc.outer_k
-        res = froot(f_res, x0, method='krylov',
+        res = froot(mycc.get_res, x0, method='krylov',
                     options={'fatol': tolnormt, 'tol_norm': safe_max_abs, 
                              'disp': True, 'maxiter': max_cycle // inner_m,
                              'line_search': 'wolfe',
@@ -156,22 +210,14 @@ def kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
                                              'inner_inner_m': inner_m, 'inner_tol': tolnormt * 0.5,
                                              'outer_k': outer_k, 'inner_M': M}
                             })
-    elif mycc.method == 'df-sane':
-        res = froot(f_res, x0, method='df-sane',
-                    options={'fatol': tolnormt, 'disp': True, 'maxfev': max_cycle,
-                             'fnorm': safe_max_abs})
     else:
         raise ValueError
-    
-    conv = res.success
-    t1, t2 = v2a(res.x)
-    eccsd = mycc.energy(t1, t2, eris)
 
+    conv = res.success
+    mycc.distribute_vector_(res.x)
+    eccsd = mycc.energy()
     mycc.e_corr = eccsd
-    mycc.t1 = t1
-    mycc.t2 = t2
-    log.timer('CCSD', *cput0)
-    return conv, eccsd, t1, t2
+    return conv, eccsd, mycc.t1, mycc.t2
 
 def precond_finv(mycc, t1, t2, eris, tol=1e-8, inplace=True):
     """
@@ -300,11 +346,13 @@ class GGCCSD_KRYLOV(GGCCSD):
         
         if self.e_hf is None:
             self.e_hf = self._scf.e_tot
-
-        self.converged, self.e_corr, self.t1, self.t2 = \
-                kernel(self, eris, t1, t2, max_cycle=self.max_cycle,
-                       tol=self.conv_tol, tolnormt=self.conv_tol_normt,
-                       verbose=self.verbose)
+        
+        pre_kernel(self, eris, t1, t2, max_cycle=self.max_cycle,
+                   tol=self.conv_tol, tolnormt=self.conv_tol_normt,
+                   verbose=self.verbose)
+        
+        self.conv, self.eccsd, self.t1, self.t2 = kernel(self)
+        
         if rank == 0:
             self._finalize()
         return self.e_corr, self.t1, self.t2
@@ -312,15 +360,23 @@ class GGCCSD_KRYLOV(GGCCSD):
     def solve_lambda(self, t1=None, t2=None, l1=None, l2=None,
                      eris=None, approx_l=False):
         from mpi4pyscf.cc import gccsd_lambda_krylov
-        self.converged_lambda, self.l1, self.l2 = \
-                gccsd_lambda_krylov.kernel(self, eris, t1, t2, l1, l2,
-                                           max_cycle=self.max_cycle,
-                                           tol=self.conv_tol_normt,
-                                           verbose=self.verbose, approx_l=approx_l)
+        gccsd_lambda_krylov.pre_kernel(self, eris, t1, t2, l1, l2,
+                                       max_cycle=self.max_cycle,
+                                       tol=self.conv_tol_normt,
+                                       verbose=self.verbose, approx_l=approx_l)
+        
+        if approx_l:
+            conv = True
+        else:
+            conv, self.l1, self.l2 = gccsd_lambda_krylov.kernel(self)
         return self.l1, self.l2
     
     precond_finv = precond_finv
     precond_diag = precond_diag
+    mop = mop
+    distribute_vector_ = distribute_vector_
+    gather_vector = gather_vector
+    get_res = get_res
 
 if __name__ == '__main__':
     from pyscf import gto
