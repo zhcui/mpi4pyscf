@@ -87,7 +87,7 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
     mycc.cycle = 0
     return mycc
     
-@mpi.parallel_call
+@mpi.parallel_call(skip_args=[1], skip_kwargs=['vec'])
 def distribute_vector_(mycc, vec=None, write='t'):
     """
     Distribute the entire vector of amplitudes tensor (nvec,) to
@@ -128,7 +128,6 @@ def gather_vector(mycc, vec=None):
     vec = mpi.gather_new(vec.reshape(-1, seg)).ravel()
     return vec
 
-#@mpi.parallel_call
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def get_res(mycc, x):
     """
@@ -161,7 +160,6 @@ def get_res(mycc, x):
     res = mycc.gather_vector(res)
     return res
 
-#@mpi.parallel_call
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def mop(mycc, x):
     """
