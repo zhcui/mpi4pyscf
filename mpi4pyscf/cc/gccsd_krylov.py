@@ -128,7 +128,8 @@ def gather_vector(mycc, vec=None):
     vec = mpi.gather_new(vec.reshape(-1, seg)).ravel()
     return vec
 
-@mpi.parallel_call
+#@mpi.parallel_call
+@mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def get_res(mycc, x):
     """
     Get the residual vector of CC.
@@ -160,7 +161,8 @@ def get_res(mycc, x):
     res = mycc.gather_vector(res)
     return res
 
-@mpi.parallel_call
+#@mpi.parallel_call
+@mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def mop(mycc, x):
     """
     preconditioner.

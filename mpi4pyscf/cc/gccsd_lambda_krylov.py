@@ -83,7 +83,8 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     mycc.cycle = 0
     return mycc
 
-@mpi.parallel_call
+#@mpi.parallel_call
+@mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def get_lambda_res(mycc, x):
     """
     Get the residual vector of CC lambda.
@@ -115,7 +116,8 @@ def get_lambda_res(mycc, x):
     res = mycc.gather_vector(res)
     return res
 
-@mpi.parallel_call
+#@mpi.parallel_call
+@mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def mop(mycc, x):
     """
     preconditioner.
