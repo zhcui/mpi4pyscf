@@ -720,11 +720,12 @@ def energy(mycc, t1=None, t2=None, eris=None):
         logger.warn(mycc, 'Non-zero imaginary part found in CCSD energy %s', e)
     return e.real
 
-@mpi.parallel_call
+@mpi.parallel_call(skip_args=[1, 2], skip_kwargs=['t1', 't2'])
 def distribute_amplitudes_(mycc, t1=None, t2=None):
-    '''Distribute the entire t2 amplitudes tensor (nocc,nocc,nvir,nvir) to
+    """
+    Distribute the entire t2 amplitudes tensor (nocc,nocc,nvir,nvir) to
     different processes
-    '''
+    """
     _sync_(mycc)
     if rank == 0:
         if t1 is None: t1 = mycc.t1
