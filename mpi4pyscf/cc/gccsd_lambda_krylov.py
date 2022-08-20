@@ -25,7 +25,7 @@ from mpi4pyscf.lib import logger
 from mpi4pyscf.tools import mpi
 from mpi4pyscf.cc.ccsd import _sync_
 from mpi4pyscf.cc.gccsd_lambda import (make_intermediates, update_lambda)
-from mpi4pyscf.cc.gccsd_krylov import (precond_finv, precond_diag, safe_max_abs)
+from mpi4pyscf.cc.gccsd_krylov import (make_precond_vec_finv, safe_max_abs)
 
 comm = mpi.comm
 rank = mpi.rank
@@ -80,6 +80,8 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     mycc.l2 = l2
     vec = mycc.amplitudes_to_vector(l1, l2)
     mycc.vec = mycc.gather_vector(vec)
+    # initialize the precond vector
+    #mycc.precond_vec = make_precond_vec_finv(mycc, l2, eris)
     mycc.cycle = 0
     return mycc
 
@@ -115,29 +117,6 @@ def get_lambda_res(mycc, x):
     res = mycc.gather_vector(res)
     return res
 
-@mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
-def mop(mycc, x):
-    """
-    preconditioner.
-
-    Args:
-        x: vector of CC amps (at root).
-    Returns:
-        res: x after applied precond.
-    """
-    _sync_(mycc)
-    eris = getattr(mycc, '_eris', None)
-    
-    vec = mycc.distribute_vector_(x, write='l')
-    l1, l2 = mycc.l1, mycc.l2
-    if mycc.precond == 'finv':
-        l1, l2 = precond_finv(mycc, l1, l2, eris)
-    else:
-        l1, l2 = precond_diag(mycc, l1, l2, eris)
-    res = mycc.amplitudes_to_vector(l1, l2)
-    res = mycc.gather_vector(res)
-    return res
-
 @mpi.parallel_call
 def release_imds(mycc):
     mycc._imds = None
@@ -151,12 +130,10 @@ def kernel(mycc):
     max_cycle = mycc.max_cycle
     vec_size = mycc.vec.size
     
-    def mop_(x):
-        return mop(mycc, x)
     if mycc.precond is None:
         M = None
     else:
-        M = spla.LinearOperator((vec_size, vec_size), matvec=mop_)
+        M = spla.LinearOperator((vec_size, vec_size), matvec=mycc.mop)
     
     def f_res(x):
         return get_lambda_res(mycc, x)

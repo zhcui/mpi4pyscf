@@ -84,9 +84,34 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
     mycc.t2 = t2
     vec = mycc.amplitudes_to_vector(t1, t2)
     mycc.vec = mycc.gather_vector(vec)
+    # initialize the precond vector
+    mycc.precond_vec = make_precond_vec_finv(mycc, t2, eris)
+    if rank != 0:
+        mycc.precond_vec = None
     mycc.cycle = 0
     return mycc
     
+def make_precond_vec_finv(mycc, t2, eris, tol=1e-8):
+    """
+    Fock inversion as preconditioner.
+    """
+    nocc, _, nvir_seg, nvir = t2.shape
+    ntasks = mpi.pool.size
+    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    vloc0, vloc1 = vlocs[rank]
+    
+    mo_e_o = eris.mo_energy[:nocc]
+    mo_e_v = eris.mo_energy[nocc:] + mycc.level_shift
+    
+    eia = mo_e_o[:, None] - mo_e_v
+    eia[eia > -tol] = -tol
+    t1Tnew = eia.T
+    t2Tnew = lib.direct_sum('ia + jb -> abij', eia[:, vloc0:vloc1], eia)
+    
+    res = mycc.amplitudes_to_vector(t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1))
+    res = mycc.gather_vector(res)
+    return res
+
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['vec'])
 def distribute_vector_(mycc, vec=None, write='t'):
     """
@@ -160,7 +185,6 @@ def get_res(mycc, x):
     res = mycc.gather_vector(res)
     return res
 
-@mpi.parallel_call(skip_args=[1], skip_kwargs=['x'])
 def mop(mycc, x):
     """
     preconditioner.
@@ -170,18 +194,10 @@ def mop(mycc, x):
     Returns:
         res: x after applied precond.
     """
-    _sync_(mycc)
-    eris = getattr(mycc, '_eris', None)
-    
-    vec = mycc.distribute_vector_(x)
-    t1, t2 = mycc.t1, mycc.t2
-    if mycc.precond == 'finv':
-        t1, t2 = precond_finv(mycc, t1, t2, eris)
-    else:
-        t1, t2 = precond_diag(mycc, t1, t2, eris)
-    res = mycc.amplitudes_to_vector(t1, t2)
-    res = mycc.gather_vector(res)
-    return res
+    #res = x / mycc.precond_vec
+    #return res
+    x /= mycc.precond_vec
+    return x
 
 def kernel(mycc):
     """
@@ -218,35 +234,6 @@ def kernel(mycc):
     eccsd = mycc.energy()
     mycc.e_corr = eccsd
     return conv, eccsd, mycc.t1, mycc.t2
-
-def precond_finv(mycc, t1, t2, eris, tol=1e-8, inplace=True):
-    """
-    Fock inversion as preconditioner.
-    """
-    t1Tnew = np.array(t1.T, order='C', copy=(not inplace))
-    t2Tnew = np.array(t2.transpose(2, 3, 0, 1), order='C', copy=(not inplace))
-    nvir_seg, nvir, nocc = t2Tnew.shape[:3]
-    ntasks = mpi.pool.size
-    
-    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
-    vloc0, vloc1 = vlocs[rank]
-    assert vloc1 - vloc0 == nvir_seg
-    
-    mo_e_o = eris.mo_energy[:nocc]
-    mo_e_v = eris.mo_energy[nocc:] + mycc.level_shift
-    
-    eia = mo_e_o[:, None] - mo_e_v
-    eia[eia > -tol] = -tol
-    t1Tnew /= eia.T
-    for i in range(vloc0, vloc1):
-        t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
-    return t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1)
-    
-def precond_diag(mycc, t1, t2, eris, tol=1e-8):
-    """
-    Diagonal preconditioner.
-    """
-    raise NotImplementedError
 
 def _init_ggccsd_krylov(ccsd_obj):
     from pyscf import gto
@@ -299,9 +286,11 @@ class GGCCSD_KRYLOV(GGCCSD):
         self.precond = precond
         self.inner_m = inner_m
         self.outer_k = outer_k
-        
+        self.precond_vec = None
+
         self._keys = self._keys.union(["remove_h2", "save_mem", "rk", 
-                                       "method", "precond", "inner_m", "outer_k"])
+                                       "method", "precond", "inner_m", "outer_k",
+                                       "precond_vec"])
 
         regs = mpi.pool.apply(_init_ggccsd_krylov, (self,), (None,))
         self._reg_procs = regs
@@ -351,7 +340,7 @@ class GGCCSD_KRYLOV(GGCCSD):
                    tol=self.conv_tol, tolnormt=self.conv_tol_normt,
                    verbose=self.verbose)
         
-        self.conv, self.eccsd, self.t1, self.t2 = kernel(self)
+        self.converged, self.eccsd, self.t1, self.t2 = kernel(self)
         
         if rank == 0:
             self._finalize()
@@ -369,10 +358,9 @@ class GGCCSD_KRYLOV(GGCCSD):
             conv = True
         else:
             conv, self.l1, self.l2 = gccsd_lambda_krylov.kernel(self)
+        self.converged_lambda = conv
         return self.l1, self.l2
     
-    precond_finv = precond_finv
-    precond_diag = precond_diag
     mop = mop
     distribute_vector_ = distribute_vector_
     gather_vector = gather_vector
