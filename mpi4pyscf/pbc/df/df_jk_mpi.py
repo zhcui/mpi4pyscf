@@ -104,7 +104,7 @@ def get_naoaux(gdf):
     return naux
 
 @mpi.parallel_call
-def get_j_kpts(cell, cderi, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
+def get_j_kpts(cell, cderi, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None, df_args={}):
     log = logger.Logger(cell.stdout, cell.verbose)
     t1 = (logger.process_clock(), logger.perf_counter())
     
@@ -112,6 +112,7 @@ def get_j_kpts(cell, cderi, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=No
     # mydf is not allowed to pass as argument in the MPI code.
     mydf = df.GDF(cell, kpts)
     mydf._cderi = cderi
+    mydf.__dict__.update(df_args)
     
     if mydf._cderi is None or not mydf.has_kpts(kpts_band):
         if mydf._cderi is not None:
@@ -220,13 +221,14 @@ def get_j_kpts(cell, cderi, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=No
 
 @mpi.parallel_call
 def get_k_kpts(cell, cderi, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
-               exxdiv=None):
+               exxdiv=None, df_args={}):
     log = logger.Logger(cell.stdout, cell.verbose)
     
     # ZHC NOTE
     # mydf is not allowed to pass as argument in the MPI code.
     mydf = df.GDF(cell, kpts)
     mydf._cderi = cderi
+    mydf.__dict__.update(df_args)
 
     if exxdiv is not None and exxdiv != 'ewald':
         log.warn('GDF does not support exxdiv %s. '
