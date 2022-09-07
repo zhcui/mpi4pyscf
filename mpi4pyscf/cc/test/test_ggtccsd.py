@@ -143,10 +143,10 @@ mycc.conv_tol_normt = 1e-7
 mycc.max_cycle = 50
 mycc.kernel()
 
-# MPI GGTCCSD
 E_ref = mycc.e_corr
-rdm1_ref = mycc.make_rdm1(ao_repr=True, approx_l=True)
+rdm1_ref = mycc.make_rdm1(ao_repr=True)
 
+# MPI GGTCCSD
 mycc = mpicc.gtccsd.GGTCCSD(mf, ncas=ncas, nelecas=nelecas)
 mycc.conv_tol = 1e-9
 mycc.conv_tol_normt = 1e-7

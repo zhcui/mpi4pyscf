@@ -338,6 +338,16 @@ class GGTCCSD(GGCCSD):
     def ao2mo(self, mo_coeff=None):
         _make_eris_incore_ghf(self, mo_coeff)
         return 'Done'
+    
+    def solve_lambda(self, t1=None, t2=None, l1=None, l2=None,
+                     eris=None, approx_l=False):
+        from mpi4pyscf.cc.gtccsd_lambda import kernel as lambda_kernel
+        self.converged_lambda, self.l1, self.l2 = \
+                      lambda_kernel(self, eris, t1, t2, l1, l2,
+                                    max_cycle=self.max_cycle,
+                                    tol=self.conv_tol_normt,
+                                    verbose=self.verbose, approx_l=approx_l)
+        return self.l1, self.l2
 
     fill_amps_cas = fill_amps_cas
     update_amps = update_amps
