@@ -260,7 +260,7 @@ class GGTCCSD(GGCCSD):
     """
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
                  remove_h2=False, save_mem=False, 
-                 ncas=0, nelecas=0):
+                 ncas=0, nelecas=0, nocc=None):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -271,7 +271,10 @@ class GGTCCSD(GGCCSD):
         
         # initialize CAS space
         nmo = self.nmo
-        nocc = self.nocc
+        if nocc is None:
+            nocc = self.nocc
+        else:
+            self.nocc = nocc
 
         ncore = nocc - nelecas
         nocc_cas = nelecas
