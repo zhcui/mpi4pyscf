@@ -64,7 +64,12 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
             l2 = t2
         else:
             l2 = mycc.l2
-    
+
+    # ZHC NOTE frozen abab
+    if comm.allreduce(getattr(mycc, "frozen_abab", False), op=mpi.MPI.LOR):
+        mycc.remove_t2_abab(t2)
+        mycc.remove_t2_abab(l2)
+
     if approx_l:
         mycc.l1 = l1
         mycc.l2 = l2
@@ -423,6 +428,8 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
             l1Tnew /= eia.T
             for i in range(vloc0, vloc1):
                 l2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
+    elif comm.allreduce(getattr(mycc, "frozen_abab", False), op=mpi.MPI.LOR):
+        mycc.remove_t2_abab(l2Tnew.transpose(2, 3, 0, 1))
 
     time0 = log.timer_debug1('update l1 l2', *time0)
     return l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1)

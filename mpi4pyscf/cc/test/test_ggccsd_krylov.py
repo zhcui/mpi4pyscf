@@ -163,3 +163,35 @@ print (rdm1)
 print ("rdm1 diff to ref", max_abs(rdm1 - rdm1_ref))
 assert max_abs(rdm1 - rdm1_ref) < 1e-5
 
+
+# ref serial GCCSD with abab frozen
+print ("FROZEN ABAB")
+mycc = cc_solver.GGCCSD_KRYLOV(mf)
+mycc.conv_tol = 1e-9
+mycc.conv_tol_normt = 1e-7
+mycc.max_cycle = 50
+mycc.frozen_abab = True
+mycc.kernel()
+
+# krylov
+E_ref = mycc.e_corr
+rdm1_ref = mycc.make_rdm1(ao_repr=True)
+
+mycc = mpicc.gccsd_krylov.GGCCSD_KRYLOV(mf)
+mycc.conv_tol = 1e-9
+mycc.conv_tol_normt = 1e-7
+mycc.max_cycle = 200
+mycc.frozen_abab = True
+mycc.kernel()
+
+print ("E diff: ", abs(mycc.e_corr - E_ref))
+assert abs(mycc.e_corr - E_ref) < 1e-6
+
+mycc.solve_lambda()
+rdm1 = mycc.make_rdm1(ao_repr=True)
+
+print ("rdm1")
+print (rdm1)
+print ("rdm1 diff to ref", max_abs(rdm1 - rdm1_ref))
+assert max_abs(rdm1 - rdm1_ref) < 1e-5
+

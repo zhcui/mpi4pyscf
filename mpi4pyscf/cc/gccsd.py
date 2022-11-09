@@ -204,7 +204,9 @@ def update_amps(mycc, t1, t2, eris):
             t1Tnew /= eia.T
             for i in range(vloc0, vloc1):
                 t2Tnew[i-vloc0] /= lib.direct_sum('i + jb -> bij', eia[:, i], eia)
-    
+    elif comm.allreduce(getattr(mycc, "frozen_abab", False), op=mpi.MPI.LOR):
+        mycc.remove_t2_abab(t2Tnew.transpose(2, 3, 0, 1))
+
     time0 = log.timer_debug1('update t1 t2', *time0)
     return t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1)
 

@@ -51,6 +51,27 @@ def safe_max_abs(x):
     else:
         return 1e+12
 
+def remove_t2_abab(mycc, t2):
+    """
+    Set the ABAB block of t2 to 0, inplace change t2.
+    """
+    t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
+    nvir_seg, nvir, nocc = t2T.shape[:3]
+    ntasks = mpi.pool.size
+
+    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    vloc0, vloc1 = vlocs[rank]
+    assert vloc1 - vloc0 == nvir_seg
+    norb = nocc // 2
+    if vloc0 < norb:
+        end = min(vloc1, norb)
+        t2T[:(end - vloc0), norb:, :norb, norb:] = 0.0
+        t2T[:(end - vloc0), norb:, norb:, :norb] = 0.0
+    if vloc1 > norb:
+        start = max(vloc0, norb)
+        t2T[(start - vloc0):, :norb, :norb, norb:] = 0.0
+        t2T[(start - vloc0):, :norb, norb:, :norb] = 0.0
+
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
                tolnormt=1e-6, verbose=None):
@@ -75,6 +96,12 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
         t1, t2 = mycc.get_init_guess(eris)
     elif t2 is None:
         t2 = mycc.get_init_guess(eris)[1]
+
+    if comm.allreduce(getattr(mycc, "frozen_abab", False), op=mpi.MPI.LOR):
+        nocc, nvir = t1.shape
+        if nocc != nvir:
+            log.warn("nocc (%s) != nvir (%s) for frozen_abab", nocc, nvir)
+        mycc.remove_t2_abab(t2)
 
     eold = 0
     eccsd = mycc.energy(t1, t2, eris)
@@ -365,6 +392,7 @@ class GGCCSD_KRYLOV(GGCCSD):
     distribute_vector_ = distribute_vector_
     gather_vector = gather_vector
     get_res = get_res
+    remove_t2_abab = remove_t2_abab
 
 if __name__ == '__main__':
     from pyscf import gto
