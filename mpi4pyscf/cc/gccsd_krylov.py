@@ -55,7 +55,7 @@ def remove_t2_abab(mycc, t2):
     """
     Set the ABAB block of t2 to 0, inplace change t2.
     """
-    t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
+    t2T = t2.transpose(2, 3, 0, 1)
     nvir_seg, nvir, nocc = t2T.shape[:3]
     ntasks = mpi.pool.size
     
@@ -65,12 +65,11 @@ def remove_t2_abab(mycc, t2):
     vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     vloc0, vloc1 = vlocs[rank]
     assert vloc1 - vloc0 == nvir_seg
-    norb = nocc // 2
-    if vloc0 < norb:
+    if vloc0 < nvir_a:
         end = min(vloc1, nvir_a)
         t2T[:(end - vloc0), nvir_a:, :nocc_a, nocc_a:] = 0.0
         t2T[:(end - vloc0), nvir_a:, nocc_a:, :nocc_a] = 0.0
-    if vloc1 > norb:
+    if vloc1 > nvir_a:
         start = max(vloc0, nvir_a)
         t2T[(start - vloc0):, :nvir_a, :nocc_a, nocc_a:] = 0.0
         t2T[(start - vloc0):, :nvir_a, nocc_a:, :nocc_a] = 0.0
