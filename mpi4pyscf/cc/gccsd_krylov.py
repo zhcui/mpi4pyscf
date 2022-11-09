@@ -58,19 +58,22 @@ def remove_t2_abab(mycc, t2):
     t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
     nvir_seg, nvir, nocc = t2T.shape[:3]
     ntasks = mpi.pool.size
+    
+    nvir_a = mycc.nvir_a
+    nocc_a = mycc.nocc_a
 
     vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
     vloc0, vloc1 = vlocs[rank]
     assert vloc1 - vloc0 == nvir_seg
     norb = nocc // 2
     if vloc0 < norb:
-        end = min(vloc1, norb)
-        t2T[:(end - vloc0), norb:, :norb, norb:] = 0.0
-        t2T[:(end - vloc0), norb:, norb:, :norb] = 0.0
+        end = min(vloc1, nvir_a)
+        t2T[:(end - vloc0), nvir_a:, :nocc_a, nocc_a:] = 0.0
+        t2T[:(end - vloc0), nvir_a:, nocc_a:, :nocc_a] = 0.0
     if vloc1 > norb:
-        start = max(vloc0, norb)
-        t2T[(start - vloc0):, :norb, :norb, norb:] = 0.0
-        t2T[(start - vloc0):, :norb, norb:, :norb] = 0.0
+        start = max(vloc0, nvir_a)
+        t2T[(start - vloc0):, :nvir_a, :nocc_a, nocc_a:] = 0.0
+        t2T[(start - vloc0):, :nvir_a, nocc_a:, :nocc_a] = 0.0
 
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
@@ -300,8 +303,8 @@ class GGCCSD_KRYLOV(GGCCSD):
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None,
                  remove_h2=False, save_mem=False, 
                  diis_start_cycle=999999,
-                 method='krylov', precond='finv', inner_m=10, outer_k=6
-                 ):
+                 method='krylov', precond='finv', inner_m=10, outer_k=6,
+                 frozen_abab=False, nocc_a=None, nvir_a=None):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -314,10 +317,15 @@ class GGCCSD_KRYLOV(GGCCSD):
         self.inner_m = inner_m
         self.outer_k = outer_k
         self.precond_vec = None
+        
+        self.frozen_abab = frozen_abab
+        self.nocc_a = nocc_a
+        self.nvir_a = nvir_a
 
         self._keys = self._keys.union(["remove_h2", "save_mem", "rk", 
                                        "method", "precond", "inner_m", "outer_k",
-                                       "precond_vec"])
+                                       "precond_vec", "frozen_abab", 
+                                       "nocc_a", "nvir_a"])
 
         regs = mpi.pool.apply(_init_ggccsd_krylov, (self,), (None,))
         self._reg_procs = regs
@@ -329,6 +337,9 @@ class GGCCSD_KRYLOV(GGCCSD):
             logger.info(self, "precond = %s", self.precond)
             logger.info(self, "inner_m = %d", self.inner_m)
             logger.info(self, "outer_k = %d", self.outer_k)
+            logger.info(self, "frozen_abab = %s", self.frozen_abab)
+            logger.info(self, "nocc_a  = %s", self.nocc_a)
+            logger.info(self, "nvir_a  = %s", self.nvir_a)
         return self
     
     def pack(self):
@@ -350,7 +361,10 @@ class GGCCSD_KRYLOV(GGCCSD):
                 'method'     : self.method,
                 'precond'    : self.precond,
                 'inner_m'    : self.inner_m,
-                'outer_k'    : self.outer_k
+                'outer_k'    : self.outer_k,
+                'frozen_abab': self.frozen_abab,
+                'nocc_a'     : self.nocc_a,
+                'nvir_a'     : self.nvir_a,
                 }
     
     def ccsd(self, t1=None, t2=None, eris=None):

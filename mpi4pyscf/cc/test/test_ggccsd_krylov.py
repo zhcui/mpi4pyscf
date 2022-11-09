@@ -171,6 +171,7 @@ mycc.conv_tol = 1e-9
 mycc.conv_tol_normt = 1e-7
 mycc.max_cycle = 50
 mycc.frozen_abab = True
+mycc.nocc_a, mycc.nvir_a = 4, 6
 mycc.kernel()
 
 # krylov
@@ -182,6 +183,7 @@ mycc.conv_tol = 1e-9
 mycc.conv_tol_normt = 1e-7
 mycc.max_cycle = 200
 mycc.frozen_abab = True
+mycc.nocc_a, mycc.nvir_a = 4, 6
 mycc.kernel()
 
 print ("E diff: ", abs(mycc.e_corr - E_ref))
