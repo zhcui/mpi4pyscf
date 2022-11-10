@@ -74,6 +74,29 @@ def remove_t2_abab(mycc, t2):
         t2T[(start - vloc0):, :nvir_a, :nocc_a, nocc_a:] = 0.0
         t2T[(start - vloc0):, :nvir_a, nocc_a:, :nocc_a] = 0.0
 
+def remove_t2_aaaa_bbbb(mycc, t2):
+    """
+    Set the AAAA and BBBB blocks of t2 to 0, inplace change t2.
+    """
+    t2T = t2.transpose(2, 3, 0, 1)
+    nvir_seg, nvir, nocc = t2T.shape[:3]
+    ntasks = mpi.pool.size
+    
+    nvir_a = mycc.nvir_a
+    nocc_a = mycc.nocc_a
+
+    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    vloc0, vloc1 = vlocs[rank]
+    assert vloc1 - vloc0 == nvir_seg
+    if vloc0 < nvir_a:
+        end = min(vloc1, nvir_a)
+        t2T[:(end - vloc0), :nvir_a, :nocc_a, :nocc_a] = 0.0
+        t2T[:(end - vloc0), :nvir_a, :nocc_a, :nocc_a] = 0.0
+    if vloc1 > nvir_a:
+        start = max(vloc0, nvir_a)
+        t2T[(start - vloc0):, nvir_a:, nocc_a:, nocc_a:] = 0.0
+        t2T[(start - vloc0):, nvir_a:, nocc_a:, nocc_a:] = 0.0
+
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
                tolnormt=1e-6, verbose=None):
@@ -104,6 +127,11 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
         if nocc != nvir:
             log.warn("nocc (%s) != nvir (%s) for frozen_abab", nocc, nvir)
         mycc.remove_t2_abab(t2)
+    if comm.allreduce(getattr(mycc, "frozen_aaaa_bbbb", False), op=mpi.MPI.LOR):
+        nocc, nvir = t1.shape
+        if nocc != nvir:
+            log.warn("nocc (%s) != nvir (%s) for frozen_aaaa_bbbb", nocc, nvir)
+        mycc.remove_t2_aaaa_bbbb(t2)
 
     eold = 0
     eccsd = mycc.energy(t1, t2, eris)
@@ -303,7 +331,8 @@ class GGCCSD_KRYLOV(GGCCSD):
                  remove_h2=False, save_mem=False, 
                  diis_start_cycle=999999,
                  method='krylov', precond='finv', inner_m=10, outer_k=6,
-                 frozen_abab=False, nocc_a=None, nvir_a=None):
+                 frozen_abab=False, frozen_aaaa_bbbb=False, 
+                 nocc_a=None, nvir_a=None):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -318,12 +347,13 @@ class GGCCSD_KRYLOV(GGCCSD):
         self.precond_vec = None
         
         self.frozen_abab = frozen_abab
+        self.frozen_aaaa_bbbb = frozen_aaaa_bbbb
         self.nocc_a = nocc_a
         self.nvir_a = nvir_a
 
         self._keys = self._keys.union(["remove_h2", "save_mem", "rk", 
                                        "method", "precond", "inner_m", "outer_k",
-                                       "precond_vec", "frozen_abab", 
+                                       "precond_vec", "frozen_abab", "frozen_aaaa_bbbb", 
                                        "nocc_a", "nvir_a"])
 
         regs = mpi.pool.apply(_init_ggccsd_krylov, (self,), (None,))
@@ -337,6 +367,7 @@ class GGCCSD_KRYLOV(GGCCSD):
             logger.info(self, "inner_m = %d", self.inner_m)
             logger.info(self, "outer_k = %d", self.outer_k)
             logger.info(self, "frozen_abab = %s", self.frozen_abab)
+            logger.info(self, "frozen_aaaa_bbbb = %s", self.frozen_aaaa_bbbb)
             logger.info(self, "nocc_a  = %s", self.nocc_a)
             logger.info(self, "nvir_a  = %s", self.nvir_a)
         return self
@@ -362,6 +393,7 @@ class GGCCSD_KRYLOV(GGCCSD):
                 'inner_m'    : self.inner_m,
                 'outer_k'    : self.outer_k,
                 'frozen_abab': self.frozen_abab,
+                'frozen_aaaa_bbbb': self.frozen_aaaa_bbbb,
                 'nocc_a'     : self.nocc_a,
                 'nvir_a'     : self.nvir_a,
                 }
@@ -406,6 +438,7 @@ class GGCCSD_KRYLOV(GGCCSD):
     gather_vector = gather_vector
     get_res = get_res
     remove_t2_abab = remove_t2_abab
+    remove_t2_aaaa_bbbb = remove_t2_aaaa_bbbb
 
 if __name__ == '__main__':
     from pyscf import gto
