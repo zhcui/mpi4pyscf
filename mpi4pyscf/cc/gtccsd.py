@@ -111,6 +111,7 @@ def get_cas_amps(mycc, eris):
             cisolver.conv_tol = mycc.conv_tol * 0.1
         else:
             cisolver = mycc.cisolver
+        mycc.cisolver = cisolver
 
         logger.info(mycc, 'TCCSD CI start.')
 
@@ -128,6 +129,8 @@ def get_cas_amps(mycc, eris):
         else:
             e_fci, fcivec = cisolver.kernel(h1, h2, ncas, (nocc_cas, 0),
                                             ecore=h0, **mycc.ci_args)
+        
+        mycc.cisolver.fcivec = fcivec
         logger.info(mycc, 'TCCSD CI energy: %25.15f', e_fci)
         
         # FCI/DMRG-MPS -> CISD -> CCSD
