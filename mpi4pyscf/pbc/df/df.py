@@ -15,7 +15,14 @@ from pyscf import lib
 from pyscf.pbc.df import ft_ao
 from pyscf.pbc.df import df
 from pyscf.pbc.df.incore import wrap_int3c
-from pyscf.pbc.df.df import fuse_auxcell, make_modrho_basis, unique
+from pyscf.pbc.df.df import make_modrho_basis, unique
+
+try:
+    from pyscf.pbc.df.df import fuse_auxcell
+except ImportError:
+    # ZHC NOTE pyscf 2.1
+    from pyscf.pbc.df.gdf_builder import fuse_auxcell
+
 from pyscf.pbc.df.df_jk import zdotCN, is_zero, gamma_point
 from pyscf.pbc.df.aft import _sub_df_jk_
 from pyscf.gto.mole import PTR_COORD
