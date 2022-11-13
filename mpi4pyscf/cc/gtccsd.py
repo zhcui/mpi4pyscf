@@ -55,9 +55,11 @@ def fill_amps_cas(mycc, t1, t2, t1_cas, t2_cas, eris=None):
     inplace change t1 and t2.
     """
     if t1_cas is None or t2_cas is None:
+        logger.info(mycc, 'No t1_cas and t2_cas given, calculate t1_cas and t2_cas')
         mycc.t1_cas, mycc.t2_cas = mycc.get_cas_amps(eris=eris)
         t1_cas = mycc.t1_cas
         t2_cas = mycc.t2_cas
+
 
     t1T = t1.T
     t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
