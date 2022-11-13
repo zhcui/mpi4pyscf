@@ -49,11 +49,18 @@ einsum = lib.einsum
 einsum_mv = lib.einsum 
 
 
-def fill_amps_cas(mycc, t1, t2, t1_cas, t2_cas):
+def fill_amps_cas(mycc, t1, t2, t1_cas, t2_cas, eris=None):
     """
     Fill the t1 and t2 with t1_cas and t2_cas.
     inplace change t1 and t2.
     """
+    if t1_cas is None or t2_cas is None:
+        logger.info(mycc, 'No t1_cas and t2_cas given, calculate t1_cas and t2_cas')
+        mycc.t1_cas, mycc.t2_cas = mycc.get_cas_amps(eris=eris)
+        t1_cas = mycc.t1_cas
+        t2_cas = mycc.t2_cas
+
+
     t1T = t1.T
     t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
     nvir_seg, nvir, nocc = t2T.shape[:3]
@@ -81,7 +88,7 @@ def update_amps(mycc, t1, t2, eris):
     Update GTCCSD amplitudes.
     """
     t1, t2 = update_amps_gccsd(mycc, t1, t2, eris)
-    mycc.fill_amps_cas(t1, t2, mycc.t1_cas, mycc.t2_cas)
+    mycc.fill_amps_cas(t1, t2, mycc.t1_cas, mycc.t2_cas, eris=eris)
     return t1, t2
 
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
@@ -222,7 +229,7 @@ def init_amps(mycc, eris=None):
     if mycc.t1_cas is None or mycc.t2_cas is None:
         mycc.t1_cas, mycc.t2_cas = mycc.get_cas_amps(eris=eris)
     
-    mycc.fill_amps_cas(mycc.t1, mycc.t2, mycc.t1_cas, mycc.t2_cas)
+    mycc.fill_amps_cas(mycc.t1, mycc.t2, mycc.t1_cas, mycc.t2_cas, eris=eris)
     
     return mycc.emp2, mycc.t1, mycc.t2
 
