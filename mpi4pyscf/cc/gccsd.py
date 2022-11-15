@@ -208,6 +208,10 @@ def update_amps(mycc, t1, t2, eris):
         mycc.remove_t2_abab(t2Tnew.transpose(2, 3, 0, 1))
     if comm.allreduce(getattr(mycc, "frozen_aaaa_bbbb", False), op=mpi.MPI.LOR):
         mycc.remove_t2_aaaa_bbbb(t2Tnew.transpose(2, 3, 0, 1))
+    if getattr(mycc, "t1_frozen_list", None) or getattr(mycc, "t2_frozen_list", None):
+        mycc.remove_amps(t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1), 
+                         t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
 
     time0 = log.timer_debug1('update t1 t2', *time0)
     return t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1)

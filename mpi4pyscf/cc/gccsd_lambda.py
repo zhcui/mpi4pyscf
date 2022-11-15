@@ -72,6 +72,13 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     if comm.allreduce(getattr(mycc, "frozen_aaaa_bbbb", False), op=mpi.MPI.LOR):
         mycc.remove_t2_aaaa_bbbb(t2)
         mycc.remove_t2_aaaa_bbbb(l2)
+    if getattr(mycc, "t1_frozen_list", None) or getattr(mycc, "t2_frozen_list", None):
+        mycc.remove_amps(t1, t2, 
+                         t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
+        mycc.remove_amps(l1, l2, 
+                         t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
 
     if approx_l:
         mycc.l1 = l1
@@ -435,6 +442,10 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
         mycc.remove_t2_abab(l2Tnew.transpose(2, 3, 0, 1))
     if comm.allreduce(getattr(mycc, "frozen_aaaa_bbbb", False), op=mpi.MPI.LOR):
         mycc.remove_t2_aaaa_bbbb(l2Tnew.transpose(2, 3, 0, 1))
+    if getattr(mycc, "t1_frozen_list", None) or getattr(mycc, "t2_frozen_list", None):
+        mycc.remove_amps(l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1), 
+                         t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
 
     time0 = log.timer_debug1('update l1 l2', *time0)
     return l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1)

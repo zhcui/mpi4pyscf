@@ -91,11 +91,119 @@ def remove_t2_aaaa_bbbb(mycc, t2):
     if vloc0 < nvir_a:
         end = min(vloc1, nvir_a)
         t2T[:(end - vloc0), :nvir_a, :nocc_a, :nocc_a] = 0.0
-        t2T[:(end - vloc0), :nvir_a, :nocc_a, :nocc_a] = 0.0
     if vloc1 > nvir_a:
         start = max(vloc0, nvir_a)
         t2T[(start - vloc0):, nvir_a:, nocc_a:, nocc_a:] = 0.0
-        t2T[(start - vloc0):, nvir_a:, nocc_a:, nocc_a:] = 0.0
+
+def remove_amps(mycc, t1, t2, t1_frozen_list=None, t2_frozen_list=None):
+    """
+    Set the blocks of amps to 0, inplace change t1 and t2.
+    
+    t1_frozen_list: [[o0, v0], ...]
+    t2_frozen_list: [[o0, o1, v0, v1]]
+
+    o and v can be 'a' or 'b'.
+    """
+    nvir_a = mycc.nvir_a
+    nocc_a = mycc.nocc_a
+
+    if t1_frozen_list is not None:
+        t1T = t1.T
+        nvir, nocc = t1T.shape
+        dic_o = {'a': slice(0, nocc_a), 'b': slice(nocc_a, nocc)}
+        dic_v = {'a': slice(0, nvir_a), 'b': slice(nvir_a, nvir)}
+        for (o0, v0) in t1_frozen_list:
+            t1T[dic_v[v0], dic_o[o0]] = 0.0
+    
+    if t2_frozen_list is not None:
+        t2T = t2.transpose(2, 3, 0, 1)
+        nvir_seg, nvir, nocc = t2T.shape[:3]
+        ntasks = mpi.pool.size
+
+        vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+        vloc0, vloc1 = vlocs[rank]
+        assert vloc1 - vloc0 == nvir_seg
+        
+        dic_o = {'a': slice(0, nocc_a), 'b': slice(nocc_a, nocc)}
+        dic_v = {'a': slice(0, nvir_a), 'b': slice(nvir_a, nvir)}
+        dic_v_seg = {'a': None, 'b': None}
+        if vloc0 < nvir_a:
+            dic_v_seg['a'] = slice(0, min(vloc1, nvir_a) - vloc0)
+        if vloc1 > nvir_a:
+            dic_v_seg['b'] = slice(max(vloc0, nvir_a) - vloc0, nvir_seg)
+        
+        for (o0, o1, v0, v1) in t2_frozen_list:
+            if dic_v_seg[v0] is not None:
+                t2T[dic_v_seg[v0], dic_v[v1], dic_o[o0], dic_o[o1]] = 0.0
+
+@mpi.parallel_call
+def analyze_amps(mycc):
+    """
+    Analyze the blocks of amps, based on spin channels.
+    """
+    log = logger.new_logger(mycc)
+    t1 = mycc.t1
+    t2 = mycc.t2
+    nvir_a = mycc.nvir_a
+    nocc_a = mycc.nocc_a
+    assert nocc_a is not None and nvir_a is not None
+
+    log.info('*' * 79)
+    log.info('Analyze amps based on spin channels.')
+    log.info("Tx %27s %12s %12s",
+             "i      a      j      b    ", "max_abs", "la.norm")
+    log.info('-' * 79)
+
+    t1T = t1.T
+    nvir, nocc = t1T.shape
+    dic_o = {'a': slice(0, nocc_a), 'b': slice(nocc_a, nocc)}
+    dic_v = {'a': slice(0, nvir_a), 'b': slice(nvir_a, nvir)}
+    
+    labs_o = {'a': "a (p)", 'b': "b (h)"}
+    labs_v = {'a': "a (h)", 'b': "b (p)"}
+
+    for o0 in ['a', 'b']:
+        for v0 in ['a', 'b']:
+            block = t1T[dic_v[v0], dic_o[o0]]
+            norm_max = safe_max_abs(block)
+            norm_tot = la.norm(block)
+            log.info("T1 %6s %6s %6s %6s %12.6f %12.6f",
+                     labs_o[o0], labs_v[v0], "", "", norm_max, norm_tot)
+    
+    t2T = t2.transpose(2, 3, 0, 1)
+    nvir_seg, nvir, nocc = t2T.shape[:3]
+    ntasks = mpi.pool.size
+
+    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+    vloc0, vloc1 = vlocs[rank]
+    assert vloc1 - vloc0 == nvir_seg
+        
+    dic_o = {'a': slice(0, nocc_a), 'b': slice(nocc_a, nocc)}
+    dic_v = {'a': slice(0, nvir_a), 'b': slice(nvir_a, nvir)}
+    dic_v_seg = {'a': None, 'b': None}
+    if vloc0 < nvir_a:
+        dic_v_seg['a'] = slice(0, min(vloc1, nvir_a) - vloc0)
+    if vloc1 > nvir_a:
+        dic_v_seg['b'] = slice(max(vloc0, nvir_a) - vloc0, nvir_seg)
+    
+    log.info('-' * 79)
+    for o0 in ['a', 'b']:
+        for v0 in ['a', 'b']:
+            for o1 in ['a', 'b']:
+                for v1 in ['a', 'b']:
+                    if dic_v_seg[v0] is None:
+                        norm_max = 0.0
+                        norm_tot = 0.0
+                    else:
+                        block = t2T[dic_v_seg[v0], dic_v[v1], dic_o[o0], dic_o[o1]]
+                        norm_max = safe_max_abs(block)
+                        norm_tot = la.norm(block) ** 2
+                    norm_max = comm.allreduce(norm_max, op=mpi.MPI.MAX)
+                    norm_tot = (comm.allreduce(norm_tot)) ** 0.5
+                    log.info("T2 %6s %6s %6s %6s %12.6f %12.6f",
+                             labs_o[o0], labs_v[v0], labs_o[o1], labs_v[v1],
+                             norm_max, norm_tot)
+    log.info('*' * 79)
 
 @mpi.parallel_call(skip_args=[1], skip_kwargs=['eris'])
 def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
@@ -132,6 +240,12 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, max_cycle=50, tol=1e-8,
         if nocc != nvir:
             log.warn("nocc (%s) != nvir (%s) for frozen_aaaa_bbbb", nocc, nvir)
         mycc.remove_t2_aaaa_bbbb(t2)
+    if getattr(mycc, "t1_frozen_list", None) or getattr(mycc, "t2_frozen_list", None):
+        nocc, nvir = t1.shape
+        if nocc != nvir:
+            log.warn("nocc (%s) != nvir (%s) for frozen amps", nocc, nvir)
+        mycc.remove_amps(t1, t2, t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
 
     eold = 0
     eccsd = mycc.energy(t1, t2, eris)
@@ -332,7 +446,8 @@ class GGCCSD_KRYLOV(GGCCSD):
                  diis_start_cycle=999999,
                  method='krylov', precond='finv', inner_m=10, outer_k=6,
                  frozen_abab=False, frozen_aaaa_bbbb=False, 
-                 nocc_a=None, nvir_a=None):
+                 nocc_a=None, nvir_a=None,
+                 t1_frozen_list=None, t2_frozen_list=None):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -350,11 +465,14 @@ class GGCCSD_KRYLOV(GGCCSD):
         self.frozen_aaaa_bbbb = frozen_aaaa_bbbb
         self.nocc_a = nocc_a
         self.nvir_a = nvir_a
+        self.t1_frozen_list = t1_frozen_list
+        self.t2_frozen_list = t2_frozen_list
 
         self._keys = self._keys.union(["remove_h2", "save_mem", "rk", 
                                        "method", "precond", "inner_m", "outer_k",
                                        "precond_vec", "frozen_abab", "frozen_aaaa_bbbb", 
-                                       "nocc_a", "nvir_a"])
+                                       "nocc_a", "nvir_a", 
+                                       "t1_frozen_list", "t2_frozen_list"])
 
         regs = mpi.pool.apply(_init_ggccsd_krylov, (self,), (None,))
         self._reg_procs = regs
@@ -370,6 +488,8 @@ class GGCCSD_KRYLOV(GGCCSD):
             logger.info(self, "frozen_aaaa_bbbb = %s", self.frozen_aaaa_bbbb)
             logger.info(self, "nocc_a  = %s", self.nocc_a)
             logger.info(self, "nvir_a  = %s", self.nvir_a)
+            logger.info(self, "t1_frozen_list  = %s", self.t1_frozen_list)
+            logger.info(self, "t2_frozen_list  = %s", self.t2_frozen_list)
         return self
     
     def pack(self):
@@ -396,6 +516,8 @@ class GGCCSD_KRYLOV(GGCCSD):
                 'frozen_aaaa_bbbb': self.frozen_aaaa_bbbb,
                 'nocc_a'     : self.nocc_a,
                 'nvir_a'     : self.nvir_a,
+                't1_frozen_list': self.t1_frozen_list,
+                't2_frozen_list': self.t2_frozen_list,
                 }
     
     def ccsd(self, t1=None, t2=None, eris=None):
@@ -437,8 +559,11 @@ class GGCCSD_KRYLOV(GGCCSD):
     distribute_vector_ = distribute_vector_
     gather_vector = gather_vector
     get_res = get_res
+    
     remove_t2_abab = remove_t2_abab
     remove_t2_aaaa_bbbb = remove_t2_aaaa_bbbb
+    remove_amps = remove_amps
+    analyze_amps = analyze_amps
 
 if __name__ == '__main__':
     from pyscf import gto

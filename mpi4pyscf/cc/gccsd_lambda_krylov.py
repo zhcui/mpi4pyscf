@@ -63,6 +63,21 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
         else:
             l2 = mycc.l2
     
+    # ZHC NOTE frozen abab
+    if comm.allreduce(getattr(mycc, "frozen_abab", False), op=mpi.MPI.LOR):
+        mycc.remove_t2_abab(t2)
+        mycc.remove_t2_abab(l2)
+    if comm.allreduce(getattr(mycc, "frozen_aaaa_bbbb", False), op=mpi.MPI.LOR):
+        mycc.remove_t2_aaaa_bbbb(t2)
+        mycc.remove_t2_aaaa_bbbb(l2)
+    if getattr(mycc, "t1_frozen_list", None) or getattr(mycc, "t2_frozen_list", None):
+        mycc.remove_amps(t1, t2, 
+                         t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
+        mycc.remove_amps(l1, l2, 
+                         t1_frozen_list=mycc.t1_frozen_list,
+                         t2_frozen_list=mycc.t2_frozen_list)
+    
     if approx_l:
         mycc.l1 = l1
         mycc.l2 = l2
