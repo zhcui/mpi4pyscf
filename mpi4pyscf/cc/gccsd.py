@@ -828,7 +828,7 @@ def restore_from_h5(mycc, fname="fcc", umat=None):
         mycc.l1 = l1
         mycc.l2 = l2
     else:
-        raise ValueError("restore_from_h5 failed, (part of) files not exist.")
+        raise ValueError("restore_from_h5 failed, (part of) files %s not exist."%filename)
     return mycc
 
 def transform_t1_to_bo(t1, u):

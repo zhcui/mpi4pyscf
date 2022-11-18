@@ -137,6 +137,16 @@ def remove_amps(mycc, t1, t2, t1_frozen_list=None, t2_frozen_list=None):
                 t2T[dic_v_seg[v0], dic_v[v1], dic_o[o0], dic_o[o1]] = 0.0
 
 @mpi.parallel_call
+def set_zero_amps(mycc):
+    """
+    Set blocks of amps to 0, based on spin channels.
+    """
+    mycc.remove_amps(mycc.t1, mycc.t2, t1_frozen_list=mycc.t1_frozen_list,
+                     t2_frozen_list=mycc.t2_frozen_list)
+    mycc.remove_amps(mycc.l1, mycc.l2, t1_frozen_list=mycc.t1_frozen_list,
+                     t2_frozen_list=mycc.t2_frozen_list)
+
+@mpi.parallel_call
 def analyze_amps(mycc):
     """
     Analyze the blocks of amps, based on spin channels.
@@ -563,6 +573,7 @@ class GGCCSD_KRYLOV(GGCCSD):
     remove_t2_abab = remove_t2_abab
     remove_t2_aaaa_bbbb = remove_t2_aaaa_bbbb
     remove_amps = remove_amps
+    set_zero_amps = set_zero_amps
     analyze_amps = analyze_amps
 
 if __name__ == '__main__':
