@@ -805,8 +805,9 @@ def restore_from_h5(mycc, fname="fcc", umat=None):
     _sync_(mycc)
     if fname.endswith(".h5"):
         fname = fname[:-3]
-    logger.info(mycc, "restore amps from h5 ...")
     filename = fname + '__rank' + str(rank) + ".h5"
+    logger.info(mycc, "restore amps from %s (rank 0-%s) ...",
+                filename, mpi.pool.size)
     if all(comm.allgather(os.path.isfile(filename))):
         t1, t2, l1, l2, mo_coeff = mycc.load_amps(fname=fname)
         if umat is not None:
