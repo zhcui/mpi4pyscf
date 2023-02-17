@@ -457,7 +457,8 @@ class GGCCSD_KRYLOV(GGCCSD):
                  method='krylov', precond='finv', inner_m=10, outer_k=6,
                  frozen_abab=False, frozen_aaaa_bbbb=False, 
                  nocc_a=None, nvir_a=None,
-                 t1_frozen_list=None, t2_frozen_list=None):
+                 t1_frozen_list=None, t2_frozen_list=None,
+                 t1_fix_list=None, t2_fix_list=None):
         assert isinstance(mf, scf.ghf.GHF)
         gccsd.GCCSD.__init__(self, mf, frozen, mo_coeff, mo_occ)
         self.remove_h2 = remove_h2
@@ -477,12 +478,15 @@ class GGCCSD_KRYLOV(GGCCSD):
         self.nvir_a = nvir_a
         self.t1_frozen_list = t1_frozen_list
         self.t2_frozen_list = t2_frozen_list
+        self.t1_fix_list = t1_fix_list
+        self.t2_fix_list = t2_fix_list
 
         self._keys = self._keys.union(["remove_h2", "save_mem", "rk", 
                                        "method", "precond", "inner_m", "outer_k",
                                        "precond_vec", "frozen_abab", "frozen_aaaa_bbbb", 
                                        "nocc_a", "nvir_a", 
-                                       "t1_frozen_list", "t2_frozen_list"])
+                                       "t1_frozen_list", "t2_frozen_list",
+                                       "t1_fix_list", "t2_fix_list"])
 
         regs = mpi.pool.apply(_init_ggccsd_krylov, (self,), (None,))
         self._reg_procs = regs
@@ -500,6 +504,8 @@ class GGCCSD_KRYLOV(GGCCSD):
             logger.info(self, "nvir_a  = %s", self.nvir_a)
             logger.info(self, "t1_frozen_list  = %s", self.t1_frozen_list)
             logger.info(self, "t2_frozen_list  = %s", self.t2_frozen_list)
+            logger.info(self, "t1_fix_list  = %s", self.t1_fix_list)
+            logger.info(self, "t2_fix_list  = %s", self.t2_fix_list)
         return self
     
     def pack(self):
@@ -528,6 +534,8 @@ class GGCCSD_KRYLOV(GGCCSD):
                 'nvir_a'     : self.nvir_a,
                 't1_frozen_list': self.t1_frozen_list,
                 't2_frozen_list': self.t2_frozen_list,
+                't1_fix_list': self.t1_fix_list,
+                't2_fix_list': self.t2_fix_list,
                 }
     
     def ccsd(self, t1=None, t2=None, eris=None):

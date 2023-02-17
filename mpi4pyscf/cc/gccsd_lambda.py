@@ -45,11 +45,6 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     cput0 = (logger.process_clock(), logger.perf_counter())
     _sync_(mycc)
 
-    eris = getattr(mycc, '_eris', None)
-    if eris is None:
-        mycc.ao2mo(mycc.mo_coeff)
-        eris = mycc._eris
-    
     if t1 is None:
         t1 = mycc.t1
     if t2 is None:
@@ -86,6 +81,11 @@ def kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
         conv = True
         return conv, l1, l2
     
+    eris = getattr(mycc, '_eris', None)
+    if eris is None:
+        mycc.ao2mo(mycc.mo_coeff)
+        eris = mycc._eris
+
     if fintermediates is None:
         fintermediates = make_intermediates
     
@@ -446,6 +446,10 @@ def update_lambda(mycc, t1, t2, l1, l2, eris, imds):
         mycc.remove_amps(l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1), 
                          t1_frozen_list=mycc.t1_frozen_list,
                          t2_frozen_list=mycc.t2_frozen_list)
+    if getattr(mycc, "t1_fix_list", None) or getattr(mycc, "t2_fix_list", None):
+        mycc.remove_amps(l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1), 
+                         t1_frozen_list=mycc.t1_fix_list,
+                         t2_frozen_list=mycc.t2_fix_list)
 
     time0 = log.timer_debug1('update l1 l2', *time0)
     return l1Tnew.T, l2Tnew.transpose(2, 3, 0, 1)

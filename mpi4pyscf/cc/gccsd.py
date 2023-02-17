@@ -212,6 +212,10 @@ def update_amps(mycc, t1, t2, eris):
         mycc.remove_amps(t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1), 
                          t1_frozen_list=mycc.t1_frozen_list,
                          t2_frozen_list=mycc.t2_frozen_list)
+    if getattr(mycc, "t1_fix_list", None) or getattr(mycc, "t2_fix_list", None):
+        mycc.remove_amps(t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1), 
+                         t1_frozen_list=mycc.t1_fix_list,
+                         t2_frozen_list=mycc.t2_fix_list)
 
     time0 = log.timer_debug1('update t1 t2', *time0)
     return t1Tnew.T, t2Tnew.transpose(2, 3, 0, 1)
@@ -762,7 +766,7 @@ def save_amps(mycc, fname="fcc"):
     lvec = None
 
 @mpi.parallel_call
-def load_amps(mycc, fname="fcc"):
+def load_amps(mycc, fname="fcc", only_t=False):
     """
     Load amplitudes from a file.
     """
@@ -779,18 +783,21 @@ def load_amps(mycc, fname="fcc"):
         tvec = None
     else:
         t1 = t2 = None
-
-    if 'lvec' in keys:
-        lvec = np.asarray(fcc["lvec"])
-        l1, l2 = mycc.vector_to_amplitudes(lvec)
-        lvec = None
-    else:
+    
+    if only_t:
         l1 = l2 = None
+    else:
+        if 'lvec' in keys:
+            lvec = np.asarray(fcc["lvec"])
+            l1, l2 = mycc.vector_to_amplitudes(lvec)
+            lvec = None
+        else:
+            l1 = l2 = None
     fcc.close()
     return t1, t2, l1, l2, mo_coeff
 
 @mpi.parallel_call
-def restore_from_h5(mycc, fname="fcc", umat=None):
+def restore_from_h5(mycc, fname="fcc", umat=None, only_t=False):
     """
     Restore t1, t2, l1, l2 from file.
     
@@ -798,6 +805,7 @@ def restore_from_h5(mycc, fname="fcc", umat=None):
         mycc: CC object.
         fname: prefix for the filename.
         umat: (nmo, nmo), rotation matrix to rotate amps.
+        only_t: if yes, will only load t1, t2; set l1, l2 to None.
 
     Return:
         mycc: CC object, with t1, t2, l1, l2 updated.
@@ -809,7 +817,7 @@ def restore_from_h5(mycc, fname="fcc", umat=None):
     logger.info(mycc, "restore amps from %s (rank 0-%s) ...",
                 filename, mpi.pool.size)
     if all(comm.allgather(os.path.isfile(filename))):
-        t1, t2, l1, l2, mo_coeff = mycc.load_amps(fname=fname)
+        t1, t2, l1, l2, mo_coeff = mycc.load_amps(fname=fname, only_t=only_t)
         if umat is not None:
             logger.info(mycc, "rotate amps ...")
             nocc, nvir = t1.shape
@@ -1046,6 +1054,10 @@ class GCCSD(gccsd.GCCSD):
     def make_rdm1(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
         '''Un-relaxed 1-particle density matrix in MO space'''
         return gccsd_rdm.make_rdm1(self, t1, t2, l1, l2, ao_repr=ao_repr)
+    
+    def make_rdm1_ref(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
+        '''Un-relaxed 1-particle density matrix in MO space'''
+        return gccsd_rdm.make_rdm1_ref(self, t1, t2, l1, l2, ao_repr=ao_repr)
 
     def make_rdm2(self, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
         '''2-particle density matrix in MO space.  The density matrix is

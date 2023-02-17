@@ -267,6 +267,35 @@ def make_rdm1(mycc, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
     return gccsd_rdm._make_rdm1(mycc, d1, with_frozen=True, ao_repr=ao_repr)
 
 @mpi.parallel_call
+def make_rdm1_ref(mycc, t1=None, t2=None, l1=None, l2=None, ao_repr=False):
+    if t1 is None:
+        t1 = mycc.t1
+    if t2 is None:
+        t2 = mycc.t2
+    if l1 is None:
+        l1 = mycc.l1
+    if l2 is None:
+        l2 = mycc.l2
+    if l1 is None:
+        l1, l2 = mycc.solve_lambda(t1, t2)
+    
+    # ZHC TODO
+    # use MPI for distributed intermediates 
+    t1, t2 = mycc.gather_amplitudes(t1, t2)
+    l1, l2 = mycc.gather_lambda(l1, l2)
+
+    if rank == 0:
+        np.save("t1_ref.npy", t1)
+        np.save("t2_ref.npy", t2)
+        np.save("l1_ref.npy", l1)
+        np.save("l2_ref.npy", l2)
+        d1 = gccsd_rdm._gamma1_intermediates(mycc, t1, t2, l1, l2)
+        rdm1 = gccsd_rdm._make_rdm1(mycc, d1, with_frozen=True, ao_repr=ao_repr)
+    else:
+        rdm1 = None
+    return rdm1
+
+@mpi.parallel_call
 def make_rdm2(mycc, t1, t2, l1, l2, ao_repr=False, with_dm1=True):
     r'''
     Two-particle density matrix in the molecular spin-orbital representation

@@ -42,11 +42,6 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
     log = logger.new_logger(mycc, verbose)
     cput0 = (logger.process_clock(), logger.perf_counter())
     _sync_(mycc)
-
-    eris = getattr(mycc, '_eris', None)
-    if eris is None:
-        mycc.ao2mo(mycc.mo_coeff)
-        eris = mycc._eris
     
     if t1 is None:
         t1 = mycc.t1
@@ -82,6 +77,11 @@ def pre_kernel(mycc, eris=None, t1=None, t2=None, l1=None, l2=None,
         mycc.l1 = l1
         mycc.l2 = l2
         return mycc
+
+    eris = getattr(mycc, '_eris', None)
+    if eris is None:
+        mycc.ao2mo(mycc.mo_coeff)
+        eris = mycc._eris
     
     if fintermediates is None:
         fintermediates = make_intermediates
