@@ -958,7 +958,9 @@ def _dev_for_worker(dev):
     '''The first argument (dev) to be sent to workers'''
     if hasattr(dev, '_reg_procs'):
         return dev._reg_procs
-    elif isinstance(dev, mole.Mole):
+    elif isinstance(dev, mole.Mole):  #for earlier pyscf
+        return dev.dumps()
+    elif isinstance(dev, mole.MoleBase): #for pyscf-v2.4.0
         return dev.dumps()
     else:
         return dev
