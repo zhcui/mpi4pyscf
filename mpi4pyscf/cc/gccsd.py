@@ -895,7 +895,6 @@ def _release_regs(mycc, remove_h2=False):
                 del mpi._registry[key]
     gc.collect()
     comm.Barrier()
-    pairs = list(mpi._registry.items())
     if not remove_h2:
         mycc._reg_procs = []
 
