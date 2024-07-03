@@ -22,6 +22,8 @@ MPI-GCCD with real intergals.
 Usage: mpirun -np 2 python gccd.py
 """
 
+import gc
+
 import numpy as np
 import scipy.linalg as la
 
@@ -440,6 +442,7 @@ def _release_regs(mycc, remove_h2=False):
                 del mpi._registry[key]
     if not remove_h2:
         mycc._reg_procs = []
+    gc.collect()
 
 class GCCD(mpigccsd.GCCSD):
     """

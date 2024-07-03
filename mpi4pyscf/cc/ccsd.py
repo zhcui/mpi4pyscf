@@ -9,6 +9,7 @@ some processors.
 '''
 
 import os
+import gc
 import time
 import ctypes
 import numpy
@@ -846,6 +847,7 @@ def _release_regs(mycc, remove_h2=False):
                 del mpi._registry[key]
     if not remove_h2:
         mycc._reg_procs = []
+    gc.collect()
 
 class CCSD(ccsd.CCSD):
     def __init__(self, mf, frozen=0, mo_coeff=None, mo_occ=None):

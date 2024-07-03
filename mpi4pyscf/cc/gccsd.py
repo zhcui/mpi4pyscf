@@ -24,8 +24,8 @@ MPI-GCCSD with real intergals.
 Usage: mpirun -np 2 python gccsd.py
 """
 
-import gc
 import os
+import gc
 import time
 from functools import reduce
 from functools import partial
@@ -744,6 +744,104 @@ def vector_to_amplitudes(vector, nmo, nocc):
 
     return t1T.T, t2T.transpose(2, 3, 0, 1)
 
+def get_votril(nvir, vloc, nocc, p0=None, p1=None):
+    idx_tril = np.tril_indices(nvir*nocc)
+    start = np.searchsorted(idx_tril[0], vloc[0]*nocc, side='left')
+    end   = np.searchsorted(idx_tril[0], (vloc[1] - 1)*nocc, side='right')
+    votril = [idx_tril[0][start:end] - vloc[0]*nocc, idx_tril[1][start:end]]
+    if (p0 is not None) and (p1 is not None):
+        votril_new = [[], []]
+        for (ix, iy) in zip(*votril):
+            if iy >= p0 and iy < p1:
+                votril_new[0].append(ix)
+                votril_new[1].append(iy)
+        votril_new[0] = np.asarray(votril_new[0])
+        votril_new[1] = np.asarray(votril_new[1])
+        votril = votril_new
+    votril = tuple(votril)
+    return votril
+
+def amplitudes_to_vector_s2(t1, t2, out=None):
+    """
+    amps to vector, with the same bahavior as pyscf gccsd.
+    vo vo packtril
+    """
+    t2T = np.asarray(t2.transpose(2, 3, 0, 1), order='C')
+    nvir_seg, nvir, nocc = t2T.shape[:3]
+
+    ntasks = mpi.pool.size
+    vlocs = [_task_location(nvir, task_id) for task_id in range(ntasks)]
+
+    # v 0 1 | 2 3 | 4
+    # o 5 6 7
+
+    # 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+    # 0 0 0 1 1 1 2 2 2 3  3  3  4  4  4
+    # 5 6 7 5 6 7 5 6 7 5  6  7  5  6  7
+    votril = get_votril(nvir, vlocs[rank], nocc)
+    size = len(votril[0])
+    nov = nocc * nvir
+    if rank == 0:
+        size += nov
+    t2_compact = t2T.transpose(0, 2, 1, 3).reshape(-1, nvir*nocc)[votril[0], votril[1]]
+
+    if rank == 0:
+        t1T = t1.T
+        vector = np.ndarray(size, t1.dtype, buffer=out)
+        vector[:nov] = t1T.ravel()
+        vector[nov:] = t2_compact
+    else:
+        vector = np.ndarray(size, t1.dtype, buffer=out)
+        vector[:] = t2_compact
+    return vector
+
+
+def vector_to_amplitudes_s2(vector, nmo, nocc):
+    """
+    vector to amps, with the same bahavior as pyscf gccsd.
+    """
+    nvir = nmo - nocc
+    nov = nocc * nvir
+
+    vlocs = [_task_location(nvir, task_id) for task_id in range(mpi.pool.size)]
+    vloc0, vloc1 = vlocs[rank]
+    nvir_seg = vloc1 - vloc0
+    votril = get_votril(nvir, vlocs[rank], nocc)
+
+    if rank == 0:
+        t1T = vector[:nov].copy().reshape(nvir, nocc)
+        mpi.bcast(t1T)
+        t2tril = vector[nov:]
+    else:
+        t1T = mpi.bcast(None)
+        t2tril = vector
+
+    t2T = np.zeros((nvir_seg*nocc, nvir*nocc), dtype=t2tril.dtype)
+    t2T[votril[0], votril[1]] = t2tril
+    t2T = t2T.reshape(nvir_seg, nocc, nvir, nocc)
+    t2tmp = mpi.alltoall_new([t2T[:, :, p0:p1] for p0,p1 in vlocs], split_recvbuf=True)
+    t2T = t2T.reshape(nvir_seg*nocc, nvir*nocc)
+    for task_id, (p0, p1) in enumerate(vlocs):
+        p0_vo = p0 * nocc
+        p1_vo = p1 * nocc
+        if task_id < rank:
+            # do not need this part since it is already filled.
+            continue
+        elif task_id == rank:
+            # fill the trlu by -tril.
+            vo_idx = get_votril(nvir, vlocs[task_id], nocc, p0=p0_vo, p1=p1_vo)
+            tmp = t2tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
+            tmp = tmp.transpose(0, 3, 1, 2).reshape((p1-p0)*nocc, nvir_seg*nocc)
+            t2T[vo_idx[1]-p0_vo, vo_idx[0]+p0_vo] = tmp[vo_idx[0], vo_idx[1]-p0]
+        else:
+            tmp = t2tmp[task_id].reshape(p1-p0, nvir_seg, nocc, nocc)
+            tmp = tmp.transpose(0, 3, 1, 2).reshape((p1-p0)*nocc, nvir_seg*nocc)
+            t2T[:, p0_vo:p1_vo] = tmp.T
+
+    t2T = t2T.reshape(nvir_seg, nocc, nvir, nocc).transpose(0, 2, 1, 3)
+    t2T = np.asarray(t2T, order='C')
+    return t1T.T, t2T.transpose(2, 3, 0, 1)
+
 @mpi.parallel_call
 def save_amps(mycc, fname="fcc"):
     """
@@ -892,9 +990,9 @@ def _release_regs(mycc, remove_h2=False):
                 mpi._registry[key]._scf = None
             else:
                 del mpi._registry[key]
-    gc.collect()
     if not remove_h2:
         mycc._reg_procs = []
+    gc.collect()
 
 class GCCSD(gccsd.GCCSD):
     """

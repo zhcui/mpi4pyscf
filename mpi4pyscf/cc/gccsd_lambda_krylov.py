@@ -16,6 +16,8 @@
 # Author: Zhi-Hao Cui <zhcui0408@gmail.com>
 #
 
+import gc
+
 import numpy as np
 from scipy import optimize as opt
 from scipy.sparse import linalg as spla
@@ -135,6 +137,7 @@ def get_lambda_res(mycc, x):
 @mpi.parallel_call
 def release_imds(mycc):
     mycc._imds = None
+    gc.collect()
 
 def kernel(mycc):
     """
