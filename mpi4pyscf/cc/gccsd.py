@@ -24,6 +24,7 @@ MPI-GCCSD with real intergals.
 Usage: mpirun -np 2 python gccsd.py
 """
 
+import gc
 import os
 import time
 from functools import reduce
@@ -891,6 +892,7 @@ def _release_regs(mycc, remove_h2=False):
                 mpi._registry[key]._scf = None
             else:
                 del mpi._registry[key]
+    gc.collect()
     if not remove_h2:
         mycc._reg_procs = []
 
@@ -986,7 +988,7 @@ class GCCSD(gccsd.GCCSD):
         """
         rccsd.CCSD._finalize(self)
         # ZHC NOTE unregister the ccsd_obj
-        #self._release_regs()
+        # self._release_regs()
         return self
 
     _release_regs = _release_regs
