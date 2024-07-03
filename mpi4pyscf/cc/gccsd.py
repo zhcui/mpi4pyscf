@@ -885,7 +885,6 @@ transform_l2_to_bo = transform_t2_to_bo
 
 @mpi.parallel_call
 def _release_regs(mycc, remove_h2=False):
-    comm.Barrier()
     pairs = list(mpi._registry.items())
     for key, val in pairs:
         if isinstance(val, (GCCSD, GGCCSD)):
@@ -894,7 +893,6 @@ def _release_regs(mycc, remove_h2=False):
             else:
                 del mpi._registry[key]
     gc.collect()
-    comm.Barrier()
     if not remove_h2:
         mycc._reg_procs = []
 
